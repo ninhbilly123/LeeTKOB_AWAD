@@ -52,12 +52,12 @@ for (const step of steps) {
   });
 
   if (result.status !== 0) {
-    console.error(`\n❌ [FAILED] ${step.name} exited with status ${result.status}`);
+    console.error(`\n[FAILED] ${step.name} exited with status ${result.status}`);
     process.exit(result.status ?? 1);
   }
-  console.log(`✅ [PASSED] ${step.name}\n`);
+  console.log(`[PASSED] ${step.name}\n`);
 }
 
 console.log(`========================================`);
-console.log(`🎉 All checks for "${action}" PASSED!`);
+console.log(`All checks for "${action}" PASSED!`);
 console.log(`========================================\n`);

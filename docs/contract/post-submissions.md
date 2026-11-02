@@ -2,20 +2,20 @@
 
 **Endpoint:** `POST /labs/{labId}/submissions`  
 **Standard Error Format:** [RFC 9457 Problem Details for HTTP APIs](https://datatracker.ietf.org/doc/html/rfc9457)  
-**Content-Type:** `application/json` (Response Errors: `application/problem+json`)
+**Content-Type:** `application/json` (Error Responses: `application/problem+json`)
 
 ---
 
 ## 1. Description & Purpose
-Cho phép sinh viên nộp bài giải cho một bài tập thực hành (lab). Bài nộp sẽ được đưa vào hàng đợi chấm trong sandbox (chạy C++17) và trả về kết quả từng test case theo thời gian thực (realtime).
+Allows an enrolled student to submit C++ solution code for an active lab assignment. The submitted code is queued for automated execution inside an isolated C++17 Docker sandbox, which pushes per-test verdicts to the student in real time.
 
 ---
 
 ## 2. Who May Call (Authorization & Ownership Rules)
-- **Role:** `STUDENT` (phải có Header `Authorization: Bearer <JWT>`).
-- **Ownership Rule:** Sinh viên thực hiện gọi API **bắt buộc phải là thành viên chính thức của lớp học (ClassMember)** sở hữu `labId` tương ứng.
-  - Nếu sinh viên không thuộc lớp này: trả về `403 Forbidden` theo RFC 9457 (không được phép xem hoặc nộp bài cho lớp khác).
-- **Admin / TA:** Không dùng endpoint này để nộp bài (chỉ dành cho sinh viên).
+- **Role:** `STUDENT` (must present a valid Bearer JWT in the `Authorization` header).
+- **Ownership Rule:** The authenticated student **must be an officially enrolled member (`ClassMember`) of the class** that owns the specified `labId`.
+  - If the student is authenticated but belongs to a different class, the server immediately rejects the request with `403 Forbidden` per RFC 9457. Students cannot inspect or submit solutions to labs belonging to other classes.
+- **Admin / TA Roles:** Forbidden from submitting code via this endpoint (grading and review only).
 
 ---
 
@@ -23,9 +23,9 @@ Cho phép sinh viên nộp bài giải cho một bài tập thực hành (lab). 
 
 | Header | Type | Required | Description |
 |---|---|---|---|
-| `Authorization` | `string` | **Yes** | Bearer token định danh sinh viên: `Bearer <jwt_token>` |
-| `Idempotency-Key` | `string (UUID v4)` | **Yes** | Khóa chống trùng lặp request khi mạng chập chờn hoặc retry |
-| `Content-Type` | `string` | **Yes** | `application/json` |
+| `Authorization` | `string` | **Yes** | Bearer JWT identifying the authenticated student: `Bearer <jwt_token>` |
+| `Idempotency-Key` | `string (UUID v4)` | **Yes** | Client-generated UUID to guarantee idempotent request retries over unreliable networks |
+| `Content-Type` | `string` | **Yes** | Must be `application/json` |
 
 ---
 
@@ -37,17 +37,17 @@ Cho phép sinh viên nộp bài giải cho một bài tập thực hành (lab). 
 }
 ```
 
-### Field Rules:
-- `code`: `string`, bắt buộc.
-  - Độ dài tối thiểu: 1 ký tự (không được là chuỗi trắng).
-  - Kích thước tối đa: **64 KB** (65,536 bytes).
-  - Ngôn ngữ: C++17 chuẩn.
+### Field Validation Rules:
+- `code`: `string`, required.
+  - Minimum length: 1 character (must not be whitespace only).
+  - Maximum payload size: **64 KB** (65,536 bytes).
+  - Programming language: Standard ISO C++17.
 
 ---
 
 ## 5. Success Response (201 Created)
 
-Khi request hợp lệ và được server tiếp nhận thành công vào hàng đợi chấm bài:
+When the submission passes validation and is successfully accepted into the grading queue:
 
 ```json
 {
@@ -63,20 +63,20 @@ Khi request hợp lệ và được server tiếp nhận thành công vào hàng
 ---
 
 ## 6. Idempotency Behavior
-- Nếu client gửi lại một request với **cùng `Idempotency-Key`** và **cùng nội dung `code`**:
-  - Server sẽ **không tạo bài nộp thứ hai**.
-  - Server trả lại chính xác kết quả `201 Created` của bài nộp ban đầu (idempotent).
-- Nếu client gửi lại **cùng `Idempotency-Key` nhưng nội dung `code` bị thay đổi**:
-  - Server từ chối và trả về lỗi `409 Conflict` (idempotency key mismatch).
+- **Identical Retries:** If a client retransmits a request with the **same `Idempotency-Key`** and **identical `code` payload**:
+  - The server **does not create a duplicate submission**.
+  - The server returns the cached original `201 Created` response.
+- **Payload Mismatch:** If a client reuses an existing `Idempotency-Key` with **different request parameters or code**:
+  - The server rejects the request with `409 Conflict` (`idempotency-conflict`).
 
 ---
 
 ## 7. Error Responses (RFC 9457 Problem Details)
 
-Toàn bộ response lỗi đều có Header `Content-Type: application/problem+json` và cấu trúc chuẩn RFC 9457:
+All error responses return `Content-Type: application/problem+json` with RFC 9457 structured fields:
 
 ### 7.1 400 Bad Request
-- **Trường hợp:** Code rỗng, chỉ chứa khoảng trắng, hoặc vượt quá giới hạn 64 KB.
+- **Scenario:** The source code string is missing, blank, or exceeds the 64 KB limit.
 ```json
 {
   "type": "https://leetkob.edu.vn/errors/bad-request",
@@ -88,19 +88,19 @@ Toàn bộ response lỗi đều có Header `Content-Type: application/problem+j
 ```
 
 ### 7.2 401 Unauthorized
-- **Trường hợp:** Thiếu header Authorization hoặc JWT token không hợp lệ / hết hạn.
+- **Scenario:** The `Authorization` header is missing, malformed, or the JWT token has expired.
 ```json
 {
   "type": "https://leetkob.edu.vn/errors/unauthorized",
   "title": "Unauthorized",
   "status": 401,
-  "detail": "Authentication token is missing or has expired.",
+  "detail": "Authentication token is missing, invalid, or has expired.",
   "instance": "/labs/lab_123/submissions"
 }
 ```
 
 ### 7.3 403 Forbidden (Ownership Check)
-- **Trường hợp:** Sinh viên đăng nhập hợp lệ nhưng không phải là học viên trong lớp chứa lab này.
+- **Scenario:** The student is authenticated but is not enrolled in the class owning this lab.
 ```json
 {
   "type": "https://leetkob.edu.vn/errors/forbidden",
@@ -112,7 +112,7 @@ Toàn bộ response lỗi đều có Header `Content-Type: application/problem+j
 ```
 
 ### 7.4 404 Not Found
-- **Trường hợp:** Không tìm thấy `labId` được chỉ định.
+- **Scenario:** The specified `labId` does not exist in the database.
 ```json
 {
   "type": "https://leetkob.edu.vn/errors/not-found",
@@ -123,8 +123,8 @@ Toàn bộ response lỗi đều có Header `Content-Type: application/problem+j
 }
 ```
 
-### 7.5 409 Conflict (Deadline Passed / Idempotency Mismatch)
-- **Trường hợp 1 - Quá hạn nộp:** Hạn nộp được tính theo thời gian server nhận request (FAQ-03). Sau hạn, lab bị khóa hoàn toàn.
+### 7.5 409 Conflict
+- **Case A — Deadline Passed:** The submission timestamp (server clock) is past the lab deadline.
 ```json
 {
   "type": "https://leetkob.edu.vn/errors/deadline-passed",
@@ -134,7 +134,7 @@ Toàn bộ response lỗi đều có Header `Content-Type: application/problem+j
   "instance": "/labs/lab_123/submissions"
 }
 ```
-- **Trường hợp 2 - Trùng Idempotency-Key nhưng khác payload:**
+- **Case B — Idempotency Key Conflict:**
 ```json
 {
   "type": "https://leetkob.edu.vn/errors/idempotency-conflict",
@@ -144,3 +144,9 @@ Toàn bộ response lỗi đều có Header `Content-Type: application/problem+j
   "instance": "/labs/lab_123/submissions"
 }
 ```
+
+---
+
+## 8. Evolution & Versioning Policy (What Happens When It Changes)
+- **Non-Breaking Changes:** Adding optional request fields (e.g., compiler flag hints) or additional informational response properties is considered backward-compatible and does not change the endpoint URI.
+- **Breaking Changes:** Any breaking modification (e.g., changing required body structure or altering the RFC 9457 error type URIs) will introduce a versioned path (`POST /v2/labs/{labId}/submissions`), maintaining backward compatibility for existing client integrations during a minimum 6-month migration grace period.

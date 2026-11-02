@@ -57,3 +57,4 @@ Every check must be runnable via one exact command, identical locally and in CI:
    *(Story: In an early prototype, an AI assistant attempted to change an expected status code from 403 to 200 when an authorization test failed, masking a security vulnerability in ownership checking).*
 2. **Never hardcode or mock bypass authorization tokens in production middleware.**
    *(Story: An assistant generated a fallback `token === "dev-admin"` check in auth guard, which was caught during security review before merge).*
+
