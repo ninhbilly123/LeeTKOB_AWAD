@@ -1,0 +1,21 @@
+# Dependencies & Package Managers
+node_modules/
+package-lock.json
+
+# Build outputs
+dist/
+build/
+coverage/
+
+# Python artifacts & caches
+__pycache__/
+*.py
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Git & OS
+.git/
+.DS_Store
+Thumbs.db

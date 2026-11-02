@@ -1,26 +1,26 @@
 # AI-LOG
 
-Mỗi mục ghi lại một công việc có trợ lý AI tham gia thực hiện, tuân thủ đúng template của môn học CSC13114.
-Thành viên:
-- **Phạm An Ninh (MSSV: Leader / DevOps & CI Gate)**
-- **Huỳnh Đăng Khoa (MSSV: Backend & Contract)**
-- **Nguyễn Nhật Duy (MSSV: AI Harness & Security)**
+One entry per task where an assistant did part of the work, complying with the CSC13114 course template.
+Team Members:
+- **Phạm An Ninh (Leader — DevOps & CI Gate)**
+- **Huỳnh Đăng Khoa (Backend & Contract)**
+- **Nguyễn Nhật Duy (AI Harness & Security)**
 
 ---
 
-## 2026-11-02 — Thiết lập Quality Gate CI và Monorepo Checks (Phạm An Ninh)
+## 2026-11-02 — Establish Quality Gate CI and Monorepo Checks (Phạm An Ninh)
 - **Tool**: Claude / Gemini (Antigravity).
-- **Asked for**: Thiết lập 4 lệnh kiểm tra chất lượng chuẩn hóa cho monorepo đa ngôn ngữ (TypeScript + Python), cấu hình GitHub Actions CI chặn merge trên branch `main`, và cơ chế Branch Protection theo Rubric PA#2.
+- **Asked for**: Set up 4 standardized quality check commands for a multi-service polyglot monorepo (TypeScript + Python), configure a GitHub Actions CI pipeline that blocks bad merges into `main`, and prepare Branch Protection evidence per the PA#2 rubric.
 - **Kept**: 
-  - 4 câu lệnh duy nhất tại root `package.json`: `npm run lint`, `npm run format:check`, `npm run typecheck`, `npm run test`.
-  - Kịch bản GitHub Actions workflow `.github/workflows/ci.yml` chạy cả Node 22 và Python 3.12 để kiểm tra toàn bộ service (`gateway`, `web`, `checker`).
-  - Phân quyền AI 3 tầng (`allowed`, `ask first`, `never`) và 2 câu chuyện lỗi thực tế đưa vào `AGENTS.md` / `CLAUDE.md`.
+  - 4 canonical commands at root `package.json`: `npm run lint`, `npm run format:check`, `npm run typecheck`, `npm run test`.
+  - GitHub Actions workflow `.github/workflows/ci.yml` provisioning dual runtimes (Node 22 LTS + Python 3.12) to test all services (`gateway`, `web`, `checker`).
+  - Three-tier AI permissions model (`allowed`, `ask first`, `never`) and two post-mortem failure stories in `AGENTS.md` and `CLAUDE.md`.
 - **Changed**:
-  - Ban đầu AI đề xuất cấu hình npm scripts dạng chuỗi `&& (cd checker && ruff check .)` - cách này bị lỗi cú pháp trên Windows PowerShell. Nhóm đã yêu cầu chuyển sang script runner `scripts/run-check.mjs` chạy qua `node:child_process.spawnSync`, tương thích 100% cả Windows local lẫn Linux GitHub Actions.
-  - Sửa `checker/pyproject.toml` thêm cấu hình `pythonpath = ["."]` để `pytest` nhận diện đúng package khi chạy từ thư mục root của monorepo.
+  - The assistant initially chained commands with `&& (cd checker && ruff check .)`, which fails on Windows PowerShell due to syntax incompatibilities. The team required replacing this with a dedicated cross-platform Node script runner `scripts/run-check.mjs` using `node:child_process.spawnSync`, ensuring 100% identical behavior on local Windows machines and Linux GitHub Actions runners.
+  - Adjusted `checker/pyproject.toml` to explicitly define `pythonpath = ["."]` so `pytest` resolves package imports when invoked from the repository root.
 - **Rejected**:
-  - Từ chối đề xuất của AI tách thành 4 workflow riêng biệt hoặc bỏ qua kiểm tra Python ở local, vì Rubric Tiêu chí 3 bắt buộc: "A fresh clone that follows the README gets them green" và một lệnh phải chạy cho toàn bộ repo.
-  - Từ chối dùng `continue-on-error: true` trong CI step: mọi check đều phải strict (thất bại là chặn merge ngay lập tức).
+  - Rejected the assistant's suggestion to split checks into 4 independent GitHub Actions workflows or skip Python checks locally; Criterion 3 strictly requires that a fresh clone gets all checks green with the exact same documented commands.
+  - Rejected adding `continue-on-error: true` to CI steps: all quality checks must be strict and gating.
 - **By hand**:
-  - Cấu hình Branch Protection trên GitHub web console (`Require status checks to pass before merging`, `Require branches to be up to date before merging`, `Require pull request reviews`).
-  - Tạo Pull Request vi phạm chất lượng để kiểm tra CI chặn đỏ (bằng chứng cho Tiêu chí 4).
+  - Configured Branch Protection on the GitHub web console (`Require status checks to pass before merging`, `Require branches to be up to date before merging`, `Require pull request reviews`).
+  - Created a deliberate violation pull request to verify CI fails red and merge is blocked (Criterion 4 evidence).
