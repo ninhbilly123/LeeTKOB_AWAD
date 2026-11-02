@@ -1,0 +1,16 @@
+{
+  "name": "leetkob",
+  "version": "0.0.1",
+  "private": true,
+  "description": "LeeTKOB — C++ lab grading system with LLM constraint checking",
+  "scripts": {
+    "lint": "node scripts/run-check.mjs lint",
+    "format:check": "node scripts/run-check.mjs format:check",
+    "typecheck": "node scripts/run-check.mjs typecheck",
+    "test": "node scripts/run-check.mjs test"
+  },
+  "workspaces": [
+    "gateway",
+    "web"
+  ]
+}

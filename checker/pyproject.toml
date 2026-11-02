@@ -1,0 +1,34 @@
+[project]
+name = "checker"
+version = "0.0.1"
+description = "LeeTKOB Constraint Checker — hard rules and LLM semantic checking"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "ruff>=0.8.0",
+  "mypy>=1.13.0",
+  "pytest>=8.3.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.11"
+mypy_path = "."
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
