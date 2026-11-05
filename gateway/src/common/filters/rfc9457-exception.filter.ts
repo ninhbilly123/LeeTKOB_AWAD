@@ -1,10 +1,4 @@
-import {
-  ExceptionFilter,
-  Catch,
-  ArgumentsHost,
-  HttpException,
-  HttpStatus,
-} from '@nestjs/common';
+import { ExceptionFilter, Catch, ArgumentsHost, HttpException, HttpStatus } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { Rfc9457ProblemDetails } from '../../submissions/submissions.types';
 
@@ -27,7 +21,10 @@ export class Rfc9457ExceptionFilter implements ExceptionFilter {
       if (typeof res === 'object' && res !== null) {
         const resObj = res as Record<string, any>;
         title = resObj.title || exception.message || this.getDefaultTitle(status);
-        detail = resObj.detail || (Array.isArray(resObj.message) ? resObj.message.join('; ') : resObj.message) || exception.message;
+        detail =
+          resObj.detail ||
+          (Array.isArray(resObj.message) ? resObj.message.join('; ') : resObj.message) ||
+          exception.message;
         type = resObj.type || this.getDefaultType(status);
       } else if (typeof res === 'string') {
         detail = res;
@@ -90,4 +87,3 @@ export class Rfc9457ExceptionFilter implements ExceptionFilter {
     }
   }
 }
-

@@ -1,4 +1,10 @@
-import { AuthenticatedUser, Lab, ClassMembership, Submission, IdempotencyRecord } from './submissions.types';
+import {
+  AuthenticatedUser,
+  Lab,
+  ClassMembership,
+  Submission,
+  IdempotencyRecord,
+} from './submissions.types';
 
 export const MOCK_LABS: Record<string, Lab> = {
   'lab_018f2d5e-7a91-7f3c-b26a-98124d63e001': {
@@ -9,7 +15,7 @@ export const MOCK_LABS: Record<string, Lab> = {
     maxPayloadSize: 65536, // 64 KB
     isActive: true,
   },
-  'lab_expired_001': {
+  lab_expired_001: {
     id: 'lab_expired_001',
     classId: 'class_cs101',
     title: 'Closed Sorting Lab',
@@ -98,4 +104,3 @@ export class InMemorySubmissionStore {
 }
 
 export const submissionStore = new InMemorySubmissionStore();
-

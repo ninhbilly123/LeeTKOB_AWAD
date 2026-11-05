@@ -42,7 +42,8 @@ export class IdempotencyInterceptor implements NestInterceptor {
             type: 'https://leetkob.edu.vn/errors/idempotency-conflict',
             title: 'Conflict',
             status: HttpStatus.CONFLICT,
-            detail: 'The provided Idempotency-Key has already been used with different request parameters.',
+            detail:
+              'The provided Idempotency-Key has already been used with different request parameters.',
           },
           HttpStatus.CONFLICT,
         );
@@ -72,4 +73,3 @@ export class IdempotencyInterceptor implements NestInterceptor {
     );
   }
 }
-

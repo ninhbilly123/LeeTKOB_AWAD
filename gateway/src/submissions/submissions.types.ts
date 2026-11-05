@@ -5,7 +5,8 @@
 
 export type UserRole = 'STUDENT' | 'TA' | 'ADMIN';
 
-export type SubmissionStatus = 'QUEUED' | 'JUDGING' | 'ACCEPTED' | 'WRONGFUL_DEDUCTION' | 'REJECTED';
+export type SubmissionStatus =
+  'QUEUED' | 'JUDGING' | 'ACCEPTED' | 'WRONGFUL_DEDUCTION' | 'REJECTED';
 
 export type EnrollmentStatus = 'ACTIVE' | 'DROPPED';
 
@@ -60,4 +61,3 @@ export interface Rfc9457ProblemDetails {
   detail: string;
   instance: string;
 }
-

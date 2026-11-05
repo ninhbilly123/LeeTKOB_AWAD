@@ -30,7 +30,8 @@ export class SubmissionsService {
           type: 'https://leetkob.edu.vn/errors/deadline-passed',
           title: 'Conflict',
           status: HttpStatus.CONFLICT,
-          detail: 'The submission deadline for this lab has passed. Late submissions are not accepted.',
+          detail:
+            'The submission deadline for this lab has passed. Late submissions are not accepted.',
         },
         HttpStatus.CONFLICT,
       );
@@ -63,4 +64,3 @@ export class SubmissionsService {
     return submissionStore.getSubmission(id);
   }
 }
-

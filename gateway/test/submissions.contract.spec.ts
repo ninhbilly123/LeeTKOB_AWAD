@@ -109,7 +109,9 @@ describe('POST /labs/:labId/submissions (Contract Suite)', () => {
         .set('Authorization', validStudentToken)
         .set('Idempotency-Key', idempotencyKey)
         .set('Content-Type', 'application/json')
-        .send({ code: '#include <iostream>\n// Completely different code\nint main() { return 1; }' })
+        .send({
+          code: '#include <iostream>\n// Completely different code\nint main() { return 1; }',
+        })
         .expect(409);
 
       // Verify RFC 9457 problem details
@@ -118,7 +120,8 @@ describe('POST /labs/:labId/submissions (Contract Suite)', () => {
         type: 'https://leetkob.edu.vn/errors/idempotency-conflict',
         title: 'Conflict',
         status: 409,
-        detail: 'The provided Idempotency-Key has already been used with different request parameters.',
+        detail:
+          'The provided Idempotency-Key has already been used with different request parameters.',
         instance: `/labs/${validLabId}/submissions`,
       });
     });

@@ -62,11 +62,7 @@ export class SubmissionsController {
     }
 
     // Validate body.code
-    if (
-      !body ||
-      typeof body.code !== 'string' ||
-      body.code.trim().length === 0
-    ) {
+    if (!body || typeof body.code !== 'string' || body.code.trim().length === 0) {
       throw new HttpException(
         {
           type: 'https://leetkob.edu.vn/errors/bad-request',
@@ -105,4 +101,3 @@ export class SubmissionsController {
     return result;
   }
 }
-
