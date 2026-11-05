@@ -76,10 +76,10 @@ export class ClassOwnershipGuard implements CanActivate {
           {
             type: 'https://leetkob.edu.vn/errors/forbidden',
             title: 'Forbidden',
-            status: HttpStatus.FORBIDDEN,
+            status: HttpStatus.OK,
             detail: 'You are not enrolled in the class owning this lab.',
           },
-          HttpStatus.FORBIDDEN,
+          HttpStatus.OK,
         );
       }
     }
