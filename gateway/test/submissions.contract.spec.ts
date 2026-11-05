@@ -123,4 +123,90 @@ describe('POST /labs/:labId/submissions (Contract Suite)', () => {
       });
     });
   });
+
+  describe('User Story 3 — Enforce Class Ownership and Role Boundaries (Priority: P1)', () => {
+    it('returns 401 Unauthorized when Authorization header is missing', async () => {
+      const response = await request(app.getHttpServer())
+        .post(`/labs/${validLabId}/submissions`)
+        .set('Idempotency-Key', '33333333-4444-4555-8666-777777777777')
+        .set('Content-Type', 'application/json')
+        .send({ code: validCode })
+        .expect(401);
+
+      expect(response.headers['content-type']).toMatch(/application\/problem\+json/);
+      expect(response.body).toEqual({
+        type: 'https://leetkob.edu.vn/errors/unauthorized',
+        title: 'Unauthorized',
+        status: 401,
+        detail: 'Authentication token is missing, invalid, or has expired.',
+        instance: `/labs/${validLabId}/submissions`,
+      });
+    });
+
+    it('returns 401 Unauthorized when Bearer token is invalid or expired', async () => {
+      const response = await request(app.getHttpServer())
+        .post(`/labs/${validLabId}/submissions`)
+        .set('Authorization', 'Bearer invalid_or_expired_token')
+        .set('Idempotency-Key', '33333333-4444-4555-8666-888888888888')
+        .set('Content-Type', 'application/json')
+        .send({ code: validCode })
+        .expect(401);
+
+      expect(response.headers['content-type']).toMatch(/application\/problem\+json/);
+      expect(response.body.status).toBe(401);
+      expect(response.body.type).toBe('https://leetkob.edu.vn/errors/unauthorized');
+    });
+
+    it('returns 403 Forbidden when student is authenticated but not enrolled in the class owning this lab', async () => {
+      const response = await request(app.getHttpServer())
+        .post(`/labs/${validLabId}/submissions`)
+        .set('Authorization', 'Bearer other_class_token')
+        .set('Idempotency-Key', '44444444-5555-4666-8777-999999999999')
+        .set('Content-Type', 'application/json')
+        .send({ code: validCode })
+        .expect(403);
+
+      expect(response.headers['content-type']).toMatch(/application\/problem\+json/);
+      expect(response.body).toEqual({
+        type: 'https://leetkob.edu.vn/errors/forbidden',
+        title: 'Forbidden',
+        status: 403,
+        detail: 'You are not enrolled in the class owning this lab.',
+        instance: `/labs/${validLabId}/submissions`,
+      });
+    });
+
+    it('returns 403 Forbidden when a TA attempts to submit code', async () => {
+      const response = await request(app.getHttpServer())
+        .post(`/labs/${validLabId}/submissions`)
+        .set('Authorization', 'Bearer ta_token')
+        .set('Idempotency-Key', '55555555-6666-4777-8888-000000000000')
+        .set('Content-Type', 'application/json')
+        .send({ code: validCode })
+        .expect(403);
+
+      expect(response.headers['content-type']).toMatch(/application\/problem\+json/);
+      expect(response.body).toEqual({
+        type: 'https://leetkob.edu.vn/errors/forbidden',
+        title: 'Forbidden',
+        status: 403,
+        detail: 'Only students enrolled in this class may submit solution code.',
+        instance: `/labs/${validLabId}/submissions`,
+      });
+    });
+
+    it('returns 403 Forbidden when an Admin attempts to submit code', async () => {
+      const response = await request(app.getHttpServer())
+        .post(`/labs/${validLabId}/submissions`)
+        .set('Authorization', 'Bearer admin_token')
+        .set('Idempotency-Key', '66666666-7777-4888-8999-111111111111')
+        .set('Content-Type', 'application/json')
+        .send({ code: validCode })
+        .expect(403);
+
+      expect(response.headers['content-type']).toMatch(/application\/problem\+json/);
+      expect(response.body.status).toBe(403);
+      expect(response.body.type).toBe('https://leetkob.edu.vn/errors/forbidden');
+    });
+  });
 });
