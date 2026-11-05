@@ -36,7 +36,7 @@ export class SubmissionsController {
     @Res({ passthrough: true }) res: Response,
   ) {
     // Validate Content-Type
-    if (contentType && !contentType.toLowerCase().includes('application/json')) {
+    if (!contentType || !contentType.toLowerCase().includes('application/json')) {
       throw new HttpException(
         {
           type: 'https://leetkob.edu.vn/errors/unsupported-media-type',

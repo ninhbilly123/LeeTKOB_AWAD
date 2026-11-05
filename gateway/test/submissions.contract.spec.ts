@@ -209,4 +209,136 @@ describe('POST /labs/:labId/submissions (Contract Suite)', () => {
       expect(response.body.type).toBe('https://leetkob.edu.vn/errors/forbidden');
     });
   });
+
+  describe('User Story 4 — Reject Invalid Payloads and Expired Deadlines (Priority: P2)', () => {
+    it('returns 400 Bad Request when code is empty or whitespace-only', async () => {
+      const response = await request(app.getHttpServer())
+        .post(`/labs/${validLabId}/submissions`)
+        .set('Authorization', validStudentToken)
+        .set('Idempotency-Key', '77777777-8888-4999-8000-111111111111')
+        .set('Content-Type', 'application/json')
+        .send({ code: '   \n\t  ' })
+        .expect(400);
+
+      expect(response.headers['content-type']).toMatch(/application\/problem\+json/);
+      expect(response.body).toEqual({
+        type: 'https://leetkob.edu.vn/errors/bad-request',
+        title: 'Bad Request',
+        status: 400,
+        detail: 'Source code cannot be empty or whitespace-only.',
+        instance: `/labs/${validLabId}/submissions`,
+      });
+    });
+
+    it('returns 400 Bad Request when code payload exceeds 64 KB limit', async () => {
+      const oversizedCode = 'a'.repeat(65537);
+      const response = await request(app.getHttpServer())
+        .post(`/labs/${validLabId}/submissions`)
+        .set('Authorization', validStudentToken)
+        .set('Idempotency-Key', '77777777-8888-4999-8000-222222222222')
+        .set('Content-Type', 'application/json')
+        .send({ code: oversizedCode })
+        .expect(400);
+
+      expect(response.headers['content-type']).toMatch(/application\/problem\+json/);
+      expect(response.body.status).toBe(400);
+      expect(response.body.type).toBe('https://leetkob.edu.vn/errors/bad-request');
+      expect(response.body.detail).toContain('Source code exceeds the 64 KB limit');
+    });
+
+    it('returns 400 Bad Request when Idempotency-Key header is missing', async () => {
+      const response = await request(app.getHttpServer())
+        .post(`/labs/${validLabId}/submissions`)
+        .set('Authorization', validStudentToken)
+        .set('Content-Type', 'application/json')
+        .send({ code: validCode })
+        .expect(400);
+
+      expect(response.headers['content-type']).toMatch(/application\/problem\+json/);
+      expect(response.body).toEqual({
+        type: 'https://leetkob.edu.vn/errors/bad-request',
+        title: 'Bad Request',
+        status: 400,
+        detail: "Header 'Idempotency-Key' is required and must be a valid UUID v4.",
+        instance: `/labs/${validLabId}/submissions`,
+      });
+    });
+
+    it('returns 400 Bad Request when Idempotency-Key is not a valid UUID v4', async () => {
+      const response = await request(app.getHttpServer())
+        .post(`/labs/${validLabId}/submissions`)
+        .set('Authorization', validStudentToken)
+        .set('Idempotency-Key', 'not-a-valid-uuid-v4')
+        .set('Content-Type', 'application/json')
+        .send({ code: validCode })
+        .expect(400);
+
+      expect(response.headers['content-type']).toMatch(/application\/problem\+json/);
+      expect(response.body.status).toBe(400);
+      expect(response.body.type).toBe('https://leetkob.edu.vn/errors/bad-request');
+      expect(response.body.detail).toBe(
+        "Header 'Idempotency-Key' is required and must be a valid UUID v4.",
+      );
+    });
+
+    it('returns 404 Not Found when labId does not exist', async () => {
+      const nonExistentLabId = 'lab_not_found_999';
+      const response = await request(app.getHttpServer())
+        .post(`/labs/${nonExistentLabId}/submissions`)
+        .set('Authorization', validStudentToken)
+        .set('Idempotency-Key', '77777777-8888-4999-8000-333333333333')
+        .set('Content-Type', 'application/json')
+        .send({ code: validCode })
+        .expect(404);
+
+      expect(response.headers['content-type']).toMatch(/application\/problem\+json/);
+      expect(response.body).toEqual({
+        type: 'https://leetkob.edu.vn/errors/not-found',
+        title: 'Not Found',
+        status: 404,
+        detail: `The requested lab with ID '${nonExistentLabId}' does not exist.`,
+        instance: `/labs/${nonExistentLabId}/submissions`,
+      });
+    });
+
+    it('returns 409 Conflict when submission deadline has passed (deadline-passed)', async () => {
+      const expiredLabId = 'lab_expired_001';
+      const response = await request(app.getHttpServer())
+        .post(`/labs/${expiredLabId}/submissions`)
+        .set('Authorization', validStudentToken)
+        .set('Idempotency-Key', '77777777-8888-4999-8000-444444444444')
+        .set('Content-Type', 'application/json')
+        .send({ code: validCode })
+        .expect(409);
+
+      expect(response.headers['content-type']).toMatch(/application\/problem\+json/);
+      expect(response.body).toEqual({
+        type: 'https://leetkob.edu.vn/errors/deadline-passed',
+        title: 'Conflict',
+        status: 409,
+        detail:
+          'The submission deadline for this lab has passed. Late submissions are not accepted.',
+        instance: `/labs/${expiredLabId}/submissions`,
+      });
+    });
+
+    it('returns 415 Unsupported Media Type when Content-Type is not application/json', async () => {
+      const response = await request(app.getHttpServer())
+        .post(`/labs/${validLabId}/submissions`)
+        .set('Authorization', validStudentToken)
+        .set('Idempotency-Key', '77777777-8888-4999-8000-555555555555')
+        .set('Content-Type', 'text/plain')
+        .send('raw plain text source code')
+        .expect(415);
+
+      expect(response.headers['content-type']).toMatch(/application\/problem\+json/);
+      expect(response.body).toEqual({
+        type: 'https://leetkob.edu.vn/errors/unsupported-media-type',
+        title: 'Unsupported Media Type',
+        status: 415,
+        detail: 'Requests must use Content-Type: application/json.',
+        instance: `/labs/${validLabId}/submissions`,
+      });
+    });
+  });
 });
