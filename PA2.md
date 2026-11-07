@@ -11,8 +11,8 @@
 | Full Name | Student ID | Primary Role |
 |---|---|---|
 | **Phạm An Ninh** | *(Leader)* | M2: DevOps, CI/CD, Quality Gate & Branch Protection |
-| **Huỳnh Đăng Khoa** | | M3: AI Harness, Rules, Permissions & Security |
-| **Nguyễn Nhật Duy** | | M1: Backend, Contract Specification & Contract Tests |
+| **Huỳnh Đăng Khoa** | 23120285 | M3: AI Harness, Rules, Permissions & Security |
+| **Nguyễn Nhật Duy** | 23120244 | M1: Backend, Contract Specification & Contract Tests |
 
 ---
 
