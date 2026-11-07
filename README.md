@@ -9,8 +9,8 @@ Course Project: **CSC13114 — Advanced Web Application Development (Capstone Co
 ## 1. Team Members
 
 - **Phạm An Ninh** (Leader — DevOps, CI/CD, Quality Gate & Branch Protection)
-- **Huỳnh Đăng Khoa** (Backend API, Contract Specification & Contract Tests)
-- **Nguyễn Nhật Duy** (AI Harness, Rules, Permissions & Security)
+- **Huỳnh Đăng Khoa** (AI Harness, Rules, Permissions & Security)
+- **Nguyễn Nhật Duy** (Backend API, Contract Specification & Contract Tests)
 
 ---
 

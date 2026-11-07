@@ -3,8 +3,8 @@
 One entry per task where an assistant did part of the work, complying with the CSC13114 course template.
 Team Members:
 - **Phạm An Ninh (Leader — DevOps & CI Gate)**
-- **Huỳnh Đăng Khoa (Backend & Contract)**
-- **Nguyễn Nhật Duy (AI Harness & Security)**
+- **Huỳnh Đăng Khoa (AI Harness & Security)**
+- **Nguyễn Nhật Duy (Backend & Contract)**
 
 ---
 
