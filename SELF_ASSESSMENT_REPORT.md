@@ -1,6 +1,6 @@
 # Self-Assessment Report — PA#2: Harness and Quality Gate
 
-- **Team**: LeeTKOB Team (Phạm An Ninh, Huỳnh Đăng Khoa, Nguyễn Nhật Duy)
+- **Team**: LeeTKOB Team (Phạm An Ninh, Huỳnh Đăng Khoa - 23120285, Nguyễn Nhật Duy - 23120244)
 - **Repository**: https://github.com/ninhbilly123/LeeTKOB_AWAD
 - **Claimed Total Score**: 100 / 100 points
 
