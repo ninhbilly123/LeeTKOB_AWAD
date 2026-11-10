@@ -9,8 +9,8 @@ Course Project: **CSC13114 — Advanced Web Application Development (Capstone Co
 ## 1. Team Members
 
 - **Phạm An Ninh** (Leader — DevOps, CI/CD, Quality Gate & Branch Protection)
-- **Huỳnh Đăng Khoa** (Backend API, Contract Specification & Contract Tests)
-- **Nguyễn Nhật Duy** (AI Harness, Rules, Permissions & Security)
+- **Huỳnh Đăng Khoa** (23120285 — AI Harness, Rules, Permissions & Security)
+- **Nguyễn Nhật Duy** (23120244 — Backend API, Contract Specification & Contract Tests)
 
 ---
 
@@ -60,5 +60,5 @@ In strict accordance with **Criterion 3 of PA#2**, each quality check runs with 
 
 ## 5. Security & Spending Cap Policy (Criterion 2)
 
-- **No Secrets in History:** All sensitive credentials are managed strictly through environment variables. The `.env.example` file documents every required variable without sensitive values. Git history is verified 100% clean of any keys or tokens.
-- **Model Spending Cap:** The LLM API key (Gemini 3.1 Flash-Lite) has a configured **hard spending limit (spending cap) of $10 USD** in Google AI Studio / Google Cloud to prevent runaway costs.
+- **No Secrets in History:** All sensitive credentials are managed strictly through environment variables. The `.env.example` file documents every required variable without values. Git history is verified 100% clean of any keys or tokens.
+- **Model Spending Cap & Cost per Lab:** The LLM API key (Gemini 3.1 Flash-Lite) has a configured **hard spending limit (spending cap) of $10 USD** in Google AI Studio / Google Cloud to prevent runaway costs. The estimated cost for one C++ lab run (approx. 80 student submissions with ~1–2 semantic constraints evaluated per submission) is **~$0.02 – $0.05 USD**, well within the configured budget cap.
