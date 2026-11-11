@@ -63,6 +63,7 @@
 
 - [Three-tier assistant permissions](AGENTS.md#41-assistant-permissions-three-tiers).
 - [Secret scan and redacted report](docs/evidence/secret-scan.md).
-- **Spending cap is not configured.** On 2026-11-11 the account owner confirmed there is no dedicated LeeTKOB model project yet. The proposed cap is $10/month; it must be configured in the provider project before paid calls are enabled. No provider cap is claimed as evidence for criterion 2.
+- **Current usage plan: Gemini API free tier**, confirmed by the team on 2026-11-11. The team may change plans later if necessary. The PA#2 checker/tests make no real model calls; their model API cost is $0, while a production per-lab cost has not been measured.
+- Free-tier quotas and billing restrictions should be supported by redacted account evidence. Their configuration has not been independently verified in this review; no configured monetary cap or $10 limit is claimed. The class brief permits free tiers, and the rubric does not prescribe a dollar amount. Any later switch to paid usage requires a deliberate limit and an update to the documented cost controls.
 - [Account-owner completion steps](docs/pa2-submission-checklist.md).
 - [Self-assessment](SELF_ASSESSMENT_REPORT.md): **96/100**, with the limitations stated explicitly.

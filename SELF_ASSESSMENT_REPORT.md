@@ -7,7 +7,7 @@
 | # | Criterion | Maximum | Claimed | Evidence and limits |
 |---|---|---:|---:|---|
 | 1 | Rules file | 15 | 15 | [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md): stack, commands, conventions, never; two concrete 2026-11-11 incidents traced to [AI-LOG.md](AI-LOG.md). |
-| 2 | Permissions and secrets | 10 | 8 | Three explicit permission tiers, empty-valued [.env.example](.env.example), [Gitleaks history scan](docs/evidence/secret-scan.md). **The proposed $10/month provider cap is not configured**; README states this. No claim of the top band for this criterion. |
+| 2 | Permissions and secrets | 10 | 8 | Three explicit permission tiers, empty-valued [.env.example](.env.example), [Gitleaks history scan](docs/evidence/secret-scan.md). The team currently uses the **Gemini API free tier**; account-level quota/billing evidence has not been independently verified. This conservative claim is about incomplete evidence, not a requirement to purchase API usage. No configured monetary cap is claimed. |
 | 3 | One command for every check | 10 | 10 | [README](README.md#3-fresh-clone-setup), [root runner](scripts/run-check.mjs), [CI](.github/workflows/ci.yml): same four commands; pinned Python tools; LF checkout policy and clean-clone verification recorded in AI-LOG. |
 | 4 | CI that blocks a merge | 20 | 19 | [Protected-main snapshot](docs/evidence/main-ruleset.json); PR #3 red run, repair commit and green run are linked in [PA2.md](PA2.md#3-a-red-gate-and-its-green-repair). Review and required check remain enforced. |
 | 5 | Contract of one endpoint | 25 | 24 | [POST submissions contract](docs/contract/post-submissions.md): role and active enrollment, field/transport limits, every error type and status, student-scoped idempotency, retention, concurrency and evolution policy. |
@@ -17,7 +17,8 @@
 
 ## What we did not manage
 
-- The provider spending cap is **not configured**; the owner has not created a dedicated LeeTKOB project. Tests make no real model calls and incur no model API cost. A production per-lab cost has not been measured.
+- The team currently uses the Gemini API free tier and may change plans later. Redacted evidence of the actual account's plan, quotas and billing restrictions is not yet included. No paid plan or configured monetary cap is claimed. Free-tier eligibility is not treated as a paid-API requirement; acceptance of those controls under the spending-cap criterion should be confirmed with the lecturer.
+- Tests make no real model calls and incur no model API cost. A production per-lab cost has not been measured.
 - The PA#2 submission repository is in-memory and empty outside tests. It is not durable or safe across multiple processes; transaction-backed persistence is later work.
 - RabbitMQ delivery, judge sandbox execution, account/token issuance and real constraint/model checking remain later-checkpoint work. A `QUEUED` response is not proof of queue delivery.
 - A peer's review and merge remain governed by the protected-main ruleset. No bypass or direct push to main is used to finish this checkpoint.

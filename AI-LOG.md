@@ -151,7 +151,7 @@ Team Members:
 - **Asked for**: Draft operating rules for AI assistants (`AGENTS.md` and `CLAUDE.md`), establish a three-tier permissions hierarchy (allowed, ask first, never), audit repository configuration to ensure zero leaked credentials, establish `.env.example` hygiene, and configure LLM provider policy with spending caps.
 - **Model & Cost Policy**:
   - **LLM Provider & Model**: Google AI Studio / Google Cloud — Gemini 3.1 Flash-Lite.
-  - **Spending Cap**: Configured hard limit of **$10 USD** in Google Cloud Billing / AI Studio.
+  - **Historical draft claim, superseded by the 2026-11-11 corrections**: this entry originally stated that a $10 cap was configured; that claim was not verified. The team currently uses the free tier.
   - **Estimated Cost per Lab**: With ~80 enrolled students submitting and an average of 1–2 semantic constraint reviews per submission, one lab run consumes approximately 100–160 LLM calls (~$0.02 – $0.05 USD total), well within the $10 USD threshold.
 - **Kept**:
   - Structured four-section rules file in `AGENTS.md` and `CLAUDE.md`: `Stack`, `Commands`, `Conventions`, `Never`.
@@ -220,3 +220,18 @@ Team Members:
   - Lint: zero warnings. Tests: 37 Gateway, one Web, two Checker (40 total). The additional Gateway e2e command passed one test.
   - Original contract assertions were retained; only test setup/authentication inputs changed. New tests increase coverage rather than changing expected status codes.
   - Gitleaks v8.30.1, verified against its official archive checksum, reported no recognized leaks across all reachable refs; report and scope limitations are in `docs/evidence/secret-scan.md`.
+
+
+---
+
+## 2026-11-11 — Clarify the current free-tier usage plan
+- **Tool**: Codex.
+- **Asked for**: Document the team's current use of the Gemini API free tier and the possibility of changing plans in the future.
+- **Changed**:
+  - Updated README, PA2, self-assessment, environment comments and the usage-plan checklist to reflect the team's declaration.
+  - Removed the implication that purchasing paid usage, creating a dedicated paid project or setting a $10/month cap is mandatory for PA#2.
+  - Distinguished free-plan quotas, account billing restrictions, a configured monetary spending cap and the $0 cost of placeholder tests. Actual account settings and production per-lab costs are not claimed as independently verified.
+- **Rejected**:
+  - Marking a paid cap as configured, asserting billing is disabled, or automatically increasing marks based solely on a free-tier declaration.
+  - Silently moving the published pa2 tag or replacing its ZIP with a different revision.
+- **Validation**: Documentation/environment comments only; check the diff for whitespace, local links and consistent usage-plan wording. No application or test behavior changes are intended.
