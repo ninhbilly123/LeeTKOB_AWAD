@@ -1,14 +1,21 @@
 # Free-tier account evidence
 
-- Status: **pending screenshots**, as of 2026-11-11.
-- Team declaration: an API key has been created and the team currently uses the Gemini API free tier. It may change plans later if necessary.
-- No screenshot or account configuration has been independently verified yet. No configured monetary spending cap is claimed.
+- Status: **screenshot supplied and visually reviewed**, 2026-11-11.
+- Source: the team's Google AI Studio API Keys screenshot, reproduced below.
 
-## Before final submission
+## What the screenshot shows
 
-1. Save screenshots showing the relevant project/provider and **Free tier** status. An API-key creation screen is useful only if it also identifies the plan; otherwise include the project/plan page.
-2. Include the actual quota and billing restrictions relevant to preventing paid usage. Do not claim billing is disabled unless the account page confirms it.
-3. Hide the complete API key, personal/billing identifiers and unrelated projects before adding images to Git. Suggested filenames are `gemini-free-tier.png` and `gemini-quota-billing.png` in this directory; these files do not exist yet.
-4. After adding and checking the images, link them here and update the pending status in PA2.md and SELF_ASSESSMENT_REPORT.md. Confirm the lecturer's interpretation of free-plan controls if needed for the spending-cap criterion.
+- The selected project is **LeeTKOB**.
+- An API key entry exists, with creation date **Nov 11, 2026**.
+- The **Billing Tier** column displays **Free tier** and a **Set up billing** action.
+- The key is shown only as a shortened suffix; the full credential is not visible. No full API key is included in this repository evidence.
 
-The team requests a self-assessment of 100/100. This declaration is not evidence that screenshots already exist or that the lecturer has awarded full marks.
+[Open the original screenshot](gemini-free-tier.png)
+
+![Google AI Studio API Keys page showing LeeTKOB on the Free tier](gemini-free-tier.png)
+
+## Scope and limits
+
+This image supports the team's declaration that its project currently uses the free tier. It does **not** display numerical quotas, a configured monetary spending cap, or an enforcement test. It is not proof that every service or account has billing disabled. No separate quota/billing screenshot has been supplied.
+
+The team may change plans later if necessary. Any move to paid usage must be documented with the actual controls selected at that time. The team's proposed self-assessment remains **100/100**; acceptance of these free-plan controls under the rubric's spending-cap criterion is the lecturer's decision.

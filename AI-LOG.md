@@ -248,3 +248,14 @@ Team Members:
   - Updated PA2.md, README and the intended ZIP filename to match the requested total. Final packaging is deferred until evidence and the submission revision are finalized; existing tag/ZIP snapshots are preserved.
 - **Rejected**: Fabricating screenshot files, marking the account evidence complete before receiving it, or changing code/tests to justify a requested score.
 - **Validation**: Documentation-only diff; score arithmetic, local links and whitespace checked. No application behavior changes.
+
+
+---
+
+## 2026-11-11 — Add and inspect the supplied free-tier screenshot
+- **Tool**: Codex.
+- **Asked for**: Incorporate the screenshot the team saved under `docs/evidence/` and update the pending evidence links.
+- **Observed**: `gemini-free-tier.png` shows Google AI Studio API Keys, project LeeTKOB, a key entry created Nov 11, 2026, and the labels Free tier and Set up billing. Only a shortened key suffix is visible; the full API key is not shown.
+- **Changed**: Linked the original image and replaced pending-image wording in README, PA2, the self-assessment and the usage checklist. Kept the team's requested 100-point claim separate from the lecturer's final grade.
+- **Rejected**: Treating this image as proof of numerical quotas, a configured monetary cap, or globally disabled billing; none is displayed. No quota/billing image was invented and no evidence pixels were edited.
+- **Validation**: Visually inspected the supplied image; checked score arithmetic, Markdown links and whitespace. Application/test behavior and published submission refs are unchanged by this evidence update.
