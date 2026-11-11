@@ -5,6 +5,7 @@
 The team confirmed on 2026-11-11 that it currently uses the Gemini API free tier. It may change plans in the future if necessary. PA#2 does not require purchasing API usage or selecting a $10/month budget.
 
 - Record the actual provider, plan, available quotas and billing restrictions. Save redacted evidence from the account console; do not expose API keys or billing identifiers.
+- The team has created an API key and will supply screenshots. Follow the [pending evidence checklist](evidence/free-tier.md); an API-key creation screen alone may not show the Free plan or its cost controls.
 - Do not describe a quota as a configured monetary cap, or claim that billing is disabled without checking the account. Those account settings have not been independently verified in the repository review.
 - The class brief explicitly permits free tiers. If the team relies on free-plan restrictions to satisfy the PA#2 spending-cap criterion, confirm the grading interpretation with the lecturer and cite the answer.
 - The PA#2 placeholder checker and tests make no real model calls, so their model API cost is $0. This is not a measured cost per production lab.
@@ -20,4 +21,4 @@ The team confirmed on 2026-11-11 that it currently uses the Gemini API free tier
 - Changes go through a reviewed PR and the required quality gate. Preserve the main ruleset.
 - Run the four documented commands for the intended submission revision. The published `pa2` tag and ZIP are snapshots: documentation edits after that tag are not automatically included in them. Do not silently move a published submission tag.
 - Confirm the tag-triggered CI is green for the chosen submission commit. [Tag checks](https://github.com/ninhbilly123/LeeTKOB_AWAD/commit/pa2/checks) and [tag workflow runs](https://github.com/ninhbilly123/LeeTKOB_AWAD/actions/workflows/ci.yml?query=branch%3Apa2) are linked in PA2.md.
-- Use `23120244-23120285-23120314_96.zip` while the proposed total remains 96. The final ZIP must match the chosen submission commit, include `.git` and `SELF_ASSESSMENT_REPORT.md`, and exclude `.env`, dependencies, caches and generated builds.
+- The team's proposed total is now **100**. Add the pending evidence, finalize the submission revision, then build `23120244-23120285-23120314_100.zip`. The final ZIP must match that commit, include `.git` and `SELF_ASSESSMENT_REPORT.md`, and exclude `.env`, dependencies, caches and generated builds. The earlier `_96.zip` and published tag are not automatically updated by this documentation change.

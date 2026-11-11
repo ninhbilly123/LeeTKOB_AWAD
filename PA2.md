@@ -65,5 +65,6 @@
 - [Secret scan and redacted report](docs/evidence/secret-scan.md).
 - **Current usage plan: Gemini API free tier**, confirmed by the team on 2026-11-11. The team may change plans later if necessary. The PA#2 checker/tests make no real model calls; their model API cost is $0, while a production per-lab cost has not been measured.
 - Free-tier quotas and billing restrictions should be supported by redacted account evidence. Their configuration has not been independently verified in this review; no configured monetary cap or $10 limit is claimed. The class brief permits free tiers, and the rubric does not prescribe a dollar amount. Any later switch to paid usage requires a deliberate limit and an update to the documented cost controls.
+- The team confirms that it has created an API key. [Free-tier account evidence](docs/evidence/free-tier.md) is **pending**: the team will add screenshots with the key hidden before final submission.
 - [Account-owner completion steps](docs/pa2-submission-checklist.md).
-- [Self-assessment](SELF_ASSESSMENT_REPORT.md): **96/100**, with the limitations stated explicitly.
+- [Self-assessment](SELF_ASSESSMENT_REPORT.md): **100/100 claimed by the team**, with pending evidence and limitations stated explicitly; this is not a confirmed grade.

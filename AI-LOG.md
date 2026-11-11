@@ -235,3 +235,16 @@ Team Members:
   - Marking a paid cap as configured, asserting billing is disabled, or automatically increasing marks based solely on a free-tier declaration.
   - Silently moving the published pa2 tag or replacing its ZIP with a different revision.
 - **Validation**: Documentation/environment comments only; check the diff for whitespace, local links and consistent usage-plan wording. No application or test behavior changes are intended.
+
+
+---
+
+## 2026-11-11 — Record the team's requested 100-point self-assessment
+- **Tool**: Codex.
+- **Asked for**: Change the team's proposed total to 100; the team will supply screenshots for its newly created API key and free-tier status.
+- **Changed**:
+  - Updated criterion claims to 15 + 10 + 10 + 20 + 25 + 15 + 5 = 100 and kept the distinction between a self-assessment and the lecturer's final grade.
+  - Added `docs/evidence/free-tier.md` with an explicit pending status and instructions to hide the API key and show the plan/quota/billing controls. No screenshots or provider monetary cap are claimed as already verified.
+  - Updated PA2.md, README and the intended ZIP filename to match the requested total. Final packaging is deferred until evidence and the submission revision are finalized; existing tag/ZIP snapshots are preserved.
+- **Rejected**: Fabricating screenshot files, marking the account evidence complete before receiving it, or changing code/tests to justify a requested score.
+- **Validation**: Documentation-only diff; score arithmetic, local links and whitespace checked. No application behavior changes.
