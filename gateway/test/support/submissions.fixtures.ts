@@ -1,10 +1,5 @@
-import {
-  AuthenticatedUser,
-  Lab,
-  ClassMembership,
-  Submission,
-  IdempotencyRecord,
-} from './submissions.types';
+import { AuthenticatedUser, Lab, ClassMembership } from '../../src/submissions/submissions.types';
+import { SubmissionStore } from '../../src/submissions/submissions.store';
 
 export const MOCK_LABS: Record<string, Lab> = {
   'lab_018f2d5e-7a91-7f3c-b26a-98124d63e001': {
@@ -63,44 +58,25 @@ export const MOCK_USERS: Record<string, AuthenticatedUser> = {
   },
 };
 
-/**
- * In-memory repository stores to handle submissions and idempotency records
- * throughout unit and contract test executions.
- */
-export class InMemorySubmissionStore {
-  private submissions: Map<string, Submission> = new Map();
-  private idempotencyRecords: Map<string, IdempotencyRecord> = new Map();
+MOCK_LABS.lab_second_001 = {
+  ...MOCK_LABS['lab_018f2d5e-7a91-7f3c-b26a-98124d63e001'],
+  id: 'lab_second_001',
+};
+MOCK_USERS.second_student = {
+  id: 'std_second_student',
+  role: 'STUDENT',
+  classIds: ['class_cs101'],
+};
+MOCK_MEMBERSHIPS.push({
+  id: 'mem_003',
+  studentId: 'std_second_student',
+  classId: 'class_cs101',
+  status: 'ACTIVE',
+});
 
-  reset(): void {
-    this.submissions.clear();
-    this.idempotencyRecords.clear();
-  }
-
-  saveSubmission(submission: Submission): void {
-    this.submissions.set(submission.id, submission);
-  }
-
-  getSubmission(id: string): Submission | undefined {
-    return this.submissions.get(id);
-  }
-
-  getAllSubmissions(): Submission[] {
-    return Array.from(this.submissions.values());
-  }
-
-  getIdempotencyRecord(key: string): IdempotencyRecord | undefined {
-    const record = this.idempotencyRecords.get(key);
-    if (!record) return undefined;
-    if (new Date(record.expiresAt).getTime() < Date.now()) {
-      this.idempotencyRecords.delete(key);
-      return undefined;
-    }
-    return record;
-  }
-
-  saveIdempotencyRecord(record: IdempotencyRecord): void {
-    this.idempotencyRecords.set(record.key, record);
+class TestSubmissionStore extends SubmissionStore {
+  override reset(): void {
+    super.reset(Object.values(MOCK_LABS), MOCK_MEMBERSHIPS);
   }
 }
-
-export const submissionStore = new InMemorySubmissionStore();
+export const submissionStore = new TestSubmissionStore();

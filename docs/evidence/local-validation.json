@@ -1,0 +1,39 @@
+{
+  "date": "2026-11-11",
+  "platform": "Windows",
+  "node": "22.20.0",
+  "npm": "10.9.3",
+  "python": "3.12.3",
+  "checks": {
+    "npm run lint": {
+      "exit_code": 0,
+      "warnings": 0
+    },
+    "npm run format:check": {
+      "exit_code": 0
+    },
+    "npm run typecheck": {
+      "exit_code": 0
+    },
+    "npm run test": {
+      "exit_code": 0,
+      "gateway_tests": 37,
+      "web_tests": 1,
+      "checker_tests": 2
+    }
+  },
+  "additional_check": {
+    "command": "npm run test:e2e --workspace=gateway -- --runInBand",
+    "exit_code": 0,
+    "tests": 1
+  },
+  "fresh_clone": {
+    "core_autocrlf": true,
+    "installation": [
+      "npm ci",
+      "python -m pip install -r checker/requirements-dev.txt"
+    ],
+    "all_four_checks_exit_code": 0,
+    "total_tests": 40
+  }
+}

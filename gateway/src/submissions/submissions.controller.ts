@@ -10,12 +10,11 @@ import {
   Req,
   Res,
   UseGuards,
-  UseInterceptors,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { SubmissionsService } from './submissions.service';
 import { ClassOwnershipGuard } from '../common/guards/class-ownership.guard';
-import { IdempotencyInterceptor } from '../common/interceptors/idempotency.interceptor';
+import { AuthenticatedRequest } from './submissions.types';
 
 const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -26,17 +25,16 @@ export class SubmissionsController {
   @Post(':labId/submissions')
   @HttpCode(201)
   @UseGuards(ClassOwnershipGuard)
-  @UseInterceptors(IdempotencyInterceptor)
   createSubmission(
     @Param('labId') labId: string,
-    @Body() body: Record<string, any>,
+    @Body() body: Record<string, unknown>,
     @Headers('idempotency-key') idempotencyKey: string,
     @Headers('content-type') contentType: string,
-    @Req() req: any,
+    @Req() req: AuthenticatedRequest,
     @Res({ passthrough: true }) res: Response,
   ) {
     // Validate Content-Type
-    if (!contentType || !contentType.toLowerCase().includes('application/json')) {
+    if (!contentType || contentType.split(';')[0].trim().toLowerCase() !== 'application/json') {
       throw new HttpException(
         {
           type: 'https://leetkob.edu.vn/errors/unsupported-media-type',
@@ -87,12 +85,13 @@ export class SubmissionsController {
       );
     }
 
-    const studentId = req.user?.id || 'std_23120244';
+    const studentId = req.user.id;
     const result = this.submissionsService.createSubmission(
       labId,
       studentId,
       body.code,
       idempotencyKey,
+      req.receivedAt,
     );
 
     res.setHeader('Location', `/labs/${labId}/submissions/${result.id}`);

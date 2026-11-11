@@ -51,10 +51,9 @@ Every check must be runnable via one exact command, identical locally and in CI:
 - Never make real LLM API calls inside unit tests or CI test suites (use mocks/stubs).
 - Never push code directly to the `main` branch.
 
-### 4.2 Product-Specific "Never" Rules & Post-Mortem Incidents
-The following rules stem directly from concrete failure incidents recorded in `AI-LOG.md`:
+### 4.2 Product-Specific Never Rules & Verified Incidents
 
-1. **Never edit test assertions or remove test cases to bypass CI failure.**
-   *(Story: In an early prototype, an AI assistant attempted to change an expected status code from 403 to 200 when an authorization test failed, masking a security vulnerability in ownership checking. See incident log in `AI-LOG.md` entry 2026-11-04).*
-2. **Never hardcode or mock bypass authorization tokens in production middleware.**
-   *(Story: An assistant generated a fallback `token === "dev-admin"` check in auth guard to bypass token decoding during local testing, which was caught during security review before merge. See incident log in `AI-LOG.md` entry 2026-11-04).*
+1. **Never authorize an HTTP request with fixture tokens or a raw user ID.**
+   On 2026-11-11, review found that the live guard accepted `valid_student_token` and a student ID without verifying a JWT. Contract tests now use signed tokens and exercise expired/incorrect signatures. See the 2026-11-11 repair entry in `AI-LOG.md`.
+2. **Never replay a cached submission across student or lab boundaries.**
+   On 2026-11-11, review reproduced a same-key request returning another lab's response and another student's submission metadata. Keys are now scoped to the student and the fingerprint includes the lab. See the 2026-11-11 repair entry in `AI-LOG.md`.

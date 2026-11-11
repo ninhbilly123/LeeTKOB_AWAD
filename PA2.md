@@ -1,53 +1,68 @@
-# PA#2 — Harness and Quality Gate Report
+# PA#2 — Harness and Quality Gate Evidence
 
-- **Project**: LeeTKOB
-- **Repository**: https://github.com/ninhbilly123/LeeTKOB_AWAD
-- **Course**: CSC13114 — Advanced Web Application Development (AWAD)
+- Project: **LeeTKOB**, CSC13114 — Advanced Web Application Development.
+- Public repository: [https://github.com/ninhbilly123/LeeTKOB_AWAD](https://github.com/ninhbilly123/LeeTKOB_AWAD).
+- Submission reference: [`pa2`](https://github.com/ninhbilly123/LeeTKOB_AWAD/tree/pa2).
 
----
+## 1. Team
 
-## 1. Team Members
-
-| Full Name | Student ID | Primary Role |
+| Member | Student ID | Role |
 |---|---|---|
-| **Phạm An Ninh** | *(Leader)* | M2: DevOps, CI/CD, Quality Gate & Branch Protection |
-| **Huỳnh Đăng Khoa** | 23120285 | M3: AI Harness, Rules, Permissions & Security |
-| **Nguyễn Nhật Duy** | 23120244 | M1: Backend, Contract Specification & Contract Tests |
+| Phạm An Ninh | 23120314 | Leader, DevOps and quality gate |
+| Huỳnh Đăng Khoa | 23120285 | AI harness, permissions and security |
+| Nguyễn Nhật Duy | 23120244 | Backend, API contract and contract tests |
 
----
+## 2. Protected main
 
-## 2. Evidence Links
+- [Active ruleset: Protect main branch](https://github.com/ninhbilly123/LeeTKOB_AWAD/rules/26341754).
+- [Public ruleset API](https://api.github.com/repos/ninhbilly123/LeeTKOB_AWAD/rulesets/26341754).
+- [Saved ruleset evidence](docs/evidence/main-ruleset.json).
+- Requires a pull request, one approving review, an up-to-date branch, and the exact status context **Quality Gate (Lint, Format, Typecheck, Test)**.
+- Main's first-parent history after the initial bootstrap consists of PR merges. This repair is submitted through a feature branch; it does not bypass review or push directly to main.
 
-In strict accordance with PA#2 rubric requirements, all required evidence links are documented below:
+## 3. A red gate and its green repair
 
-### 2.1 Public Repository
-- **Public Repository URL**: https://github.com/ninhbilly123/LeeTKOB_AWAD
+- [PR #3: Feat/submissions](https://github.com/ninhbilly123/LeeTKOB_AWAD/pull/3).
+- [Red run 41995017261](https://github.com/ninhbilly123/LeeTKOB_AWAD/actions/runs/41995017261), commit [`cf040c6`](https://github.com/ninhbilly123/LeeTKOB_AWAD/commit/cf040c66eeb7159dada9fd76e2a0ca6f0e503394): **Format Check failed**; the required quality gate was red.
+- [Repair commit `cb589cd`](https://github.com/ninhbilly123/LeeTKOB_AWAD/commit/cb589cdad732db9f3d05e7be46a71c0dbd37d22d): corrects formatting without changing assertions or expected status codes.
+- [Green run 41996690537](https://github.com/ninhbilly123/LeeTKOB_AWAD/actions/runs/41996690537) on that repair commit.
+- PR #3 was later closed and the branch was submitted as [PR #4](https://github.com/ninhbilly123/LeeTKOB_AWAD/pull/4), which was merged. It is not claimed that PR #3 itself was merged.
+- A separate [deliberate TypeScript failure, PR #1](https://github.com/ninhbilly123/LeeTKOB_AWAD/pull/1), remains red. The red-to-green evidence above is PR #3, not an invented repair of PR #1.
 
-### 2.2 Protected Branch Settings
-- **GitHub Branch Protection Rules on `main`**:
-  - `Require a pull request before merging` (prevents direct pushes to `main`).
-  - `Require status checks to pass before merging` (mandatory check: `Quality Gate (Lint, Format, Typecheck, Test)`).
-  - `Require branches to be up to date before merging`.
-- **Settings Screenshot**: `docs/images/branch-protection-settings.png` (or linked directly in the self-assessment report).
+## 4. A deliberate contract break caught by CI
 
-### 2.3 CI that Blocks a Merge (Criterion 4)
-- **Pull Request blocked by red check (Blocked PR)**: 
-  - URL: *(Link to the open test PR with red check status)*
-  - Description: PR deliberately introduces a TypeScript typing violation. GitHub Actions reports red failure, and the `Merge pull request` button is strictly blocked.
-- **Commit that turned CI green (PR turned green)**:
-  - Commit SHA: *(SHA of the commit resolving the violation)*
-  - Description: Resolves the deliberate error. CI re-runs automatically and turns green (Pass), enabling the merge button.
+- [PR #5](https://github.com/ninhbilly123/LeeTKOB_AWAD/pull/5), commit [`da5c3df`](https://github.com/ninhbilly123/LeeTKOB_AWAD/commit/da5c3df8c1872fe99342accab7ea9c8b2a9bd90b).
+- [Failing run 42001642652](https://github.com/ninhbilly123/LeeTKOB_AWAD/actions/runs/42001642652).
+- The code changed the cross-class rejection from `403` to `200`; tests were unchanged. Lint, format and typecheck passed; **Tests failed**. The broken change was not merged.
+- [Saved run and step results](docs/evidence/ci-evidence.json).
 
-### 2.4 Deliberate Contract Break (Criterion 6)
-- **Deliberate Contract Break Commit/PR**:
-  - URL / Commit SHA: *(To be executed by M1 during contract test suite validation)*
-  - Description: Deliberately alters the error response format away from RFC 9457 or modifies an expected status code, causing contract tests to bite and fail in CI.
+## 5. Checks and submission tag
 
-### 2.5 CI Run for Tag `pa2`
-- **Git Tag**: `pa2`
-- **CI Run URL**: *(Link to the GitHub Actions run corresponding to tag pa2)*
+| Check | Local and CI command |
+|---|---|
+| Lint | `npm run lint` |
+| Format | `npm run format:check` |
+| Types | `npm run typecheck` |
+| Tests | `npm run test` |
 
----
+- [Local and clean-clone validation](docs/evidence/local-validation.json).
+- Setup: [README](README.md#3-fresh-clone-setup); Node dependencies use the lockfile and Python tools use pinned requirements.
+- [Workflow](.github/workflows/ci.yml) runs for PRs to main, pushes to main, and pushes of tag **pa2**.
+- [CI checks for the submitted tag](https://github.com/ninhbilly123/LeeTKOB_AWAD/commit/pa2/checks).
+- [Tag-triggered workflow runs](https://github.com/ninhbilly123/LeeTKOB_AWAD/actions/workflows/ci.yml?query=branch%3Apa2). Open the **Quality Gate CI** run for `pa2`; these stable links resolve to the tagged commit and its actual runs without a self-referential run ID embedded in that same commit. The submission ZIP also includes `PA2_CI_RUN.txt` with the direct run URL, generated after the tag run passes.
 
-## 3. Self-Assessment Summary
-For the full criterion-by-criterion breakdown, see [SELF_ASSESSMENT_REPORT.md](./SELF_ASSESSMENT_REPORT.md).
+## 6. Contract and reproducible tests
+
+- [Endpoint contract](docs/contract/post-submissions.md).
+- [Original success/error/ownership/idempotency tests](gateway/test/submissions.contract.spec.ts).
+- [Security, concurrency, TTL and error boundary regressions](gateway/test/submission-boundaries.contract.spec.ts).
+- Tests exercise the real guard, controller, service and exception filter through HTTP. Only repository data and the signing secret are injected; the guard is not bypassed. Test JWTs are signed with an ephemeral secret.
+- The PA#2 repository is in memory and starts empty outside tests. RabbitMQ, durable storage, sandboxing and LLM integration are not claimed as complete.
+
+## 7. Secrets, spending and remaining limitation
+
+- [Three-tier assistant permissions](AGENTS.md#41-assistant-permissions-three-tiers).
+- [Secret scan and redacted report](docs/evidence/secret-scan.md).
+- **Spending cap is not configured.** On 2026-11-11 the account owner confirmed there is no dedicated LeeTKOB model project yet. The proposed cap is $10/month; it must be configured in the provider project before paid calls are enabled. No provider cap is claimed as evidence for criterion 2.
+- [Account-owner completion steps](docs/pa2-submission-checklist.md).
+- [Self-assessment](SELF_ASSESSMENT_REPORT.md): **96/100**, with the limitations stated explicitly.

@@ -12,13 +12,16 @@
 
 Allows an officially enrolled student to submit C++ solution code for an active lab assignment. When accepted, the code is recorded in `QUEUED` status and placed onto the grading message queue for isolated C++17 Docker sandbox compilation and evaluation.
 
+**PA#2 implementation boundary:** the endpoint records accepted submissions in a single-process in-memory repository. RabbitMQ delivery, durable storage, and sandbox execution are later checkpoint work; contract tests do not claim to verify those integrations.
+
 ---
 
 ## 2. Who May Call (Authorization & Ownership Rules)
 
 ### 2.1 Role Requirement
 - The caller MUST be authenticated with a valid Bearer JWT possessing role `STUDENT`.
-- Non-student roles (`TA`, `ADMIN`, `GUEST`) are strictly prohibited from submitting code to this endpoint. If a `TA` or `ADMIN` attempts to submit code, the server MUST reject the request with `403 Forbidden`.
+- JWT verification permits HS256 only, checks the signature and expiration, and requires `sub`, `role`, and `exp`. Unsupported role claims are invalid tokens (`401`). A raw user ID, unsigned token, or development token is not authentication. The private signing secret is supplied by configuration, never by this contract.
+- Non-student roles (`TA`, `ADMIN`) are strictly prohibited from submitting code to this endpoint. If a `TA` or `ADMIN` attempts to submit code, the server MUST reject the request with `403 Forbidden`.
 
 ### 2.2 Ownership & Enrollment Rule
 - The authenticated student **MUST be an active enrolled member (`ClassMember`) of the class that owns the specified `labId`**.
@@ -62,6 +65,9 @@ Allows an officially enrolled student to submit C++ solution code for an active 
 | `code` | `string` | **Yes** | • Minimum length: 1 character (must NOT be empty or whitespace-only).<br>• Maximum payload size: **64 KB** (65,536 bytes UTF-8 encoded).<br>• Target language: Standard ISO C++17. |
 
 - Malformed JSON syntax or missing `code` property triggers immediate `400 Bad Request`.
+- The 64 KB limit applies to the decoded code's UTF-8 bytes. The full JSON body has a separate **512 KB (524,288 bytes)** transport limit so valid code remains accepted when JSON escaping expands it; exceeding that transport limit returns `413`.
+- Authentication/ownership is checked before endpoint validation. Malformed or oversized JSON is rejected by the body parser before the guard. For a valid body, validation precedes idempotency lookup.
+- The deadline is compared with the server receipt timestamp, captured before body parsing; a new submission received at or after the deadline returns `409`.
 
 ---
 
@@ -95,23 +101,28 @@ Network dropouts and client retries are expected during peak submission periods.
 1. **Storage & Fingerprinting:**
    - The server stores the `Idempotency-Key` associated with the student ID, the lab ID, a SHA-256 hash of the normalized request body (`code`), and the cached `201 Created` response.
    - Idempotency records have a time-to-live (TTL) of **24 hours**.
+   - Key scope is **(authenticated student ID, Idempotency-Key)**. Different students may independently use the same key; neither receives the other's cached response. The fingerprint includes the lab ID and exact decoded code, in a canonical object field order. Extra JSON fields do not affect that fingerprint.
 2. **Identical Retries (Cache Hit):**
    - If a subsequent request arrives with an existing `Idempotency-Key` and **identical request payload**:
      - The server MUST NOT create a duplicate submission record in the database.
      - The server MUST NOT emit a duplicate message to the queue.
      - The server MUST return the cached original `201 Created` response payload and headers.
+     - An already accepted submission may be retried after its deadline during the retention period; this returns the original result rather than creating a late submission. Authentication, current ownership, and payload validation still apply.
 3. **Payload Mismatch (Conflict):**
    - If a subsequent request reuses an existing `Idempotency-Key` with **different payload content or a different lab ID**:
      - The server MUST reject the request with `409 Conflict` (`type: https://leetkob.edu.vn/errors/idempotency-conflict`).
 4. **Invalid Idempotency Key:**
    - If `Idempotency-Key` is missing or not a valid UUID v4 string:
      - The server MUST reject the request with `400 Bad Request` (`type: https://leetkob.edu.vn/errors/bad-request`).
+5. **Retention and concurrency:**
+   - After 24 hours the key is treated as new, so the caller must use normal submission/deadline rules again.
+   - Concurrent identical requests for one student/key return one submission; failed requests are not cached.
 
 ---
 
 ## 7. Error Responses (RFC 9457 Problem Details)
 
-All error responses return `Content-Type: application/problem+json` and include the mandatory RFC 9457 members: `type`, `title`, `status`, `detail`, and `instance`.
+All error responses return `Content-Type: application/problem+json`. This contract requires the following RFC 9457 members: `type`, `title`, `status`, `detail`, and `instance`.
 
 ### 7.1 400 Bad Request
 - **Scenario A — Missing or Empty Code:** Source code is missing or contains only whitespace.
@@ -233,6 +244,20 @@ All error responses return `Content-Type: application/problem+json` and include 
   "title": "Internal Server Error",
   "status": 500,
   "detail": "An unexpected error occurred while processing the submission. Please retry with the same Idempotency-Key.",
+  "instance": "/labs/lab_123/submissions"
+}
+```
+
+Internal exception messages, database details, and stack traces MUST NOT appear in this response.
+
+### 7.8 413 Payload Too Large
+- **Scenario:** The full JSON request body exceeds the 512 KB transport limit.
+```json
+{
+  "type": "https://leetkob.edu.vn/errors/payload-too-large",
+  "title": "Payload Too Large",
+  "status": 413,
+  "detail": "Request body exceeds the 512 KB transport limit.",
   "instance": "/labs/lab_123/submissions"
 }
 ```
