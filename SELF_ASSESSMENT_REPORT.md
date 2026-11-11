@@ -1,27 +1,25 @@
-# Self-Assessment Report — PA#2: Harness and Quality Gate
+# PA#2 Self-Assessment
 
-- **Team**: LeeTKOB Team (Phạm An Ninh, Huỳnh Đăng Khoa - 23120285, Nguyễn Nhật Duy - 23120244)
-- **Repository**: https://github.com/ninhbilly123/LeeTKOB_AWAD
-- **Claimed Total Score**: 100 / 100 points
+- Team: Nguyễn Nhật Duy (23120244), Huỳnh Đăng Khoa (23120285), Phạm An Ninh (23120314).
+- Public repository: https://github.com/ninhbilly123/LeeTKOB_AWAD
+- Claimed total: **96 / 100**. These are the team's proposed marks, not a confirmed lecturer grade.
 
----
+| # | Criterion | Maximum | Claimed | Evidence and limits |
+|---|---|---:|---:|---|
+| 1 | Rules file | 15 | 15 | [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md): stack, commands, conventions, never; two concrete 2026-11-11 incidents traced to [AI-LOG.md](AI-LOG.md). |
+| 2 | Permissions and secrets | 10 | 8 | Three explicit permission tiers, empty-valued [.env.example](.env.example), [Gitleaks history scan](docs/evidence/secret-scan.md). **The proposed $10/month provider cap is not configured**; README states this. No claim of the top band for this criterion. |
+| 3 | One command for every check | 10 | 10 | [README](README.md#3-fresh-clone-setup), [root runner](scripts/run-check.mjs), [CI](.github/workflows/ci.yml): same four commands; pinned Python tools; LF checkout policy and clean-clone verification recorded in AI-LOG. |
+| 4 | CI that blocks a merge | 20 | 19 | [Protected-main snapshot](docs/evidence/main-ruleset.json); PR #3 red run, repair commit and green run are linked in [PA2.md](PA2.md#3-a-red-gate-and-its-green-repair). Review and required check remain enforced. |
+| 5 | Contract of one endpoint | 25 | 24 | [POST submissions contract](docs/contract/post-submissions.md): role and active enrollment, field/transport limits, every error type and status, student-scoped idempotency, retention, concurrency and evolution policy. |
+| 6 | Contract tests that bite | 15 | 15 | [Original contract suite](gateway/test/submissions.contract.spec.ts) and [boundary regressions](gateway/test/submission-boundaries.contract.spec.ts) cover error types, ownership, JWT verification, retries, concurrency and 500 redaction. [PR #5 deliberate break and failing CI](PA2.md#4-a-deliberate-contract-break-caught-by-ci). |
+| 7 | AI-LOG | 5 | 5 | [AI-LOG.md](AI-LOG.md) identifies tools/tasks and concrete Changed/Rejected entries. The 2026-11-11 correction explicitly supersedes earlier inaccurate implementation and spending-cap claims. |
+| | **Total** | **100** | **96** | |
 
-## 1. Detailed Self-Assessment Breakdown
+## What we did not manage
 
-| # | Criterion | Max Points | Claimed Marks | Evidence & Justification |
-|---|---|:---:|:---:|---|
-| **1** | **Rules file** | 15 | 15 | `AGENTS.md` and `CLAUDE.md` at root with four required sections: *stack, commands, conventions, never*. The *never* list is product-specific (no secrets in sandbox, no real LLM calls in unit tests, never edit tests/eval data/labels to pass checks). Contains two traceable incident stories. |
-| **2** | **Permissions and secrets** | 10 | 10 | Assistant permissions explicitly documented in three tiers (*allowed, ask first, never*) in `AGENTS.md`. `.env.example` lists all configuration variables without values. Git history is 100% clean of credentials. `README.md` documents Gemini 3.1 Flash-Lite spending cap of $10 USD. |
-| **3** | **One command for every check** | 10 | 10 | Four canonical commands at root: `npm run lint`, `npm run format:check`, `npm run typecheck`, `npm run test`. Local and CI (`.github/workflows/ci.yml`) commands are 100% identical. Fresh clone following `README.md` runs completely green. |
-| **4** | **CI that blocks a merge** | 20 | 20 | `main` branch is protected with mandatory status check `Quality Gate (Lint, Format, Typecheck, Test)`. Blocked PR with red status and resolving green commit linked in `PA2.md`. No direct pushes to `main`. |
-| **5** | **The contract of one endpoint** | 25 | 25 | `docs/contract/post-submissions.md` specifies `POST /labs/{labId}/submissions`. Explicit role/ownership rules (enrolled student only), RFC 9457 Problem Details error model with all status codes, and `Idempotency-Key` duplicate prevention. |
-| **6** | **Contract tests that bite** | 15 | 15 | Comprehensive test suite covering every RFC 9457 error code, ownership enforcement, and idempotency. Runs in mandatory CI. Deliberate contract break commit/PR linked in `PA2.md`. |
-| **7** | **AI-LOG.md** | 5 | 5 | Root `AI-LOG.md` logs each task with Tool, Asked for, Kept, and concrete Changed/Rejected entries detailing assistant missteps caught by the team. |
-| **TOTAL** | | **100** | **100** | |
+- The provider spending cap is **not configured**; the owner has not created a dedicated LeeTKOB project. Tests make no real model calls and incur no model API cost. A production per-lab cost has not been measured.
+- The PA#2 submission repository is in-memory and empty outside tests. It is not durable or safe across multiple processes; transaction-backed persistence is later work.
+- RabbitMQ delivery, judge sandbox execution, account/token issuance and real constraint/model checking remain later-checkpoint work. A `QUEUED` response is not proof of queue delivery.
+- A peer's review and merge remain governed by the protected-main ruleset. No bypass or direct push to main is used to finish this checkpoint.
 
----
-
-## 2. What We Did Not Manage
-
-- The `judge` worker service (Java Spring Boot) currently has its architectural skeleton in place; detailed sandbox testing pipelines will be completed in the next milestone (PA#3) per the proposal roadmap.
-- RabbitMQ messaging queue and submission forwarding to workers use mock/stub verification within the scope of the PA#2 contract tests.
+The submission ZIP is named `23120244-23120285-23120314_96.zip`, includes `.git`, and uses the same total as this table.

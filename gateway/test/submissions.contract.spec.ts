@@ -1,25 +1,17 @@
-import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { AppModule } from '../src/app.module';
-import { submissionStore } from '../src/submissions/submissions.fixtures';
+import { createTestApp, bearerFor } from './support/test-app';
+import { submissionStore } from './support/submissions.fixtures';
 
 describe('POST /labs/:labId/submissions (Contract Suite)', () => {
   let app: INestApplication;
 
   const validLabId = 'lab_018f2d5e-7a91-7f3c-b26a-98124d63e001';
-  const validStudentToken = 'Bearer valid_student_token';
+  const validStudentToken = bearerFor();
   const validCode = '#include <iostream>\nint main() { std::cout << "Hello World"; return 0; }';
 
   beforeEach(async () => {
-    submissionStore.reset();
-
-    const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
-
-    app = moduleFixture.createNestApplication();
-    await app.init();
+    app = await createTestApp();
   });
 
   afterEach(async () => {
@@ -163,7 +155,7 @@ describe('POST /labs/:labId/submissions (Contract Suite)', () => {
     it('returns 403 Forbidden when student is authenticated but not enrolled in the class owning this lab', async () => {
       const response = await request(app.getHttpServer())
         .post(`/labs/${validLabId}/submissions`)
-        .set('Authorization', 'Bearer other_class_token')
+        .set('Authorization', bearerFor('std_other_class'))
         .set('Idempotency-Key', '44444444-5555-4666-8777-999999999999')
         .set('Content-Type', 'application/json')
         .send({ code: validCode })
@@ -182,7 +174,7 @@ describe('POST /labs/:labId/submissions (Contract Suite)', () => {
     it('returns 403 Forbidden when a TA attempts to submit code', async () => {
       const response = await request(app.getHttpServer())
         .post(`/labs/${validLabId}/submissions`)
-        .set('Authorization', 'Bearer ta_token')
+        .set('Authorization', bearerFor('usr_ta_01', 'TA'))
         .set('Idempotency-Key', '55555555-6666-4777-8888-000000000000')
         .set('Content-Type', 'application/json')
         .send({ code: validCode })
@@ -201,7 +193,7 @@ describe('POST /labs/:labId/submissions (Contract Suite)', () => {
     it('returns 403 Forbidden when an Admin attempts to submit code', async () => {
       const response = await request(app.getHttpServer())
         .post(`/labs/${validLabId}/submissions`)
-        .set('Authorization', 'Bearer admin_token')
+        .set('Authorization', bearerFor('usr_admin_01', 'ADMIN'))
         .set('Idempotency-Key', '66666666-7777-4888-8999-111111111111')
         .set('Content-Type', 'application/json')
         .send({ code: validCode })

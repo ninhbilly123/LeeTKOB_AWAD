@@ -1,0 +1,215 @@
+[
+  {
+    "run_id": 41995017261,
+    "url": "https://github.com/ninhbilly123/LeeTKOB_AWAD/actions/runs/41995017261",
+    "head_sha": "cf040c66eeb7159dada9fd76e2a0ca6f0e503394",
+    "branch": "feat/submissions",
+    "conclusion": "failure",
+    "jobs": [
+      {
+        "name": "Quality Gate (Lint, Format, Typecheck, Test)",
+        "conclusion": "failure",
+        "steps": [
+          {
+            "name": "Set up job",
+            "conclusion": "success"
+          },
+          {
+            "name": "Checkout repository",
+            "conclusion": "success"
+          },
+          {
+            "name": "Set up Node.js 22",
+            "conclusion": "success"
+          },
+          {
+            "name": "Set up Python 3.12",
+            "conclusion": "success"
+          },
+          {
+            "name": "Install Python dependencies",
+            "conclusion": "success"
+          },
+          {
+            "name": "Install Node dependencies",
+            "conclusion": "success"
+          },
+          {
+            "name": "Lint Check",
+            "conclusion": "success"
+          },
+          {
+            "name": "Format Check",
+            "conclusion": "failure"
+          },
+          {
+            "name": "Type Check",
+            "conclusion": "skipped"
+          },
+          {
+            "name": "Tests",
+            "conclusion": "skipped"
+          },
+          {
+            "name": "Post Set up Python 3.12",
+            "conclusion": "skipped"
+          },
+          {
+            "name": "Post Set up Node.js 22",
+            "conclusion": "skipped"
+          },
+          {
+            "name": "Post Checkout repository",
+            "conclusion": "success"
+          },
+          {
+            "name": "Complete job",
+            "conclusion": "success"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "run_id": 41996690537,
+    "url": "https://github.com/ninhbilly123/LeeTKOB_AWAD/actions/runs/41996690537",
+    "head_sha": "cb589cdad732db9f3d05e7be46a71c0dbd37d22d",
+    "branch": "feat/submissions",
+    "conclusion": "success",
+    "jobs": [
+      {
+        "name": "Quality Gate (Lint, Format, Typecheck, Test)",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Set up job",
+            "conclusion": "success"
+          },
+          {
+            "name": "Checkout repository",
+            "conclusion": "success"
+          },
+          {
+            "name": "Set up Node.js 22",
+            "conclusion": "success"
+          },
+          {
+            "name": "Set up Python 3.12",
+            "conclusion": "success"
+          },
+          {
+            "name": "Install Python dependencies",
+            "conclusion": "success"
+          },
+          {
+            "name": "Install Node dependencies",
+            "conclusion": "success"
+          },
+          {
+            "name": "Lint Check",
+            "conclusion": "success"
+          },
+          {
+            "name": "Format Check",
+            "conclusion": "success"
+          },
+          {
+            "name": "Type Check",
+            "conclusion": "success"
+          },
+          {
+            "name": "Tests",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Set up Python 3.12",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Set up Node.js 22",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Checkout repository",
+            "conclusion": "success"
+          },
+          {
+            "name": "Complete job",
+            "conclusion": "success"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "run_id": 42001642652,
+    "url": "https://github.com/ninhbilly123/LeeTKOB_AWAD/actions/runs/42001642652",
+    "head_sha": "da5c3df8c1872fe99342accab7ea9c8b2a9bd90b",
+    "branch": "break/contract-test-bite",
+    "conclusion": "failure",
+    "jobs": [
+      {
+        "name": "Quality Gate (Lint, Format, Typecheck, Test)",
+        "conclusion": "failure",
+        "steps": [
+          {
+            "name": "Set up job",
+            "conclusion": "success"
+          },
+          {
+            "name": "Checkout repository",
+            "conclusion": "success"
+          },
+          {
+            "name": "Set up Node.js 22",
+            "conclusion": "success"
+          },
+          {
+            "name": "Set up Python 3.12",
+            "conclusion": "success"
+          },
+          {
+            "name": "Install Python dependencies",
+            "conclusion": "success"
+          },
+          {
+            "name": "Install Node dependencies",
+            "conclusion": "success"
+          },
+          {
+            "name": "Lint Check",
+            "conclusion": "success"
+          },
+          {
+            "name": "Format Check",
+            "conclusion": "success"
+          },
+          {
+            "name": "Type Check",
+            "conclusion": "success"
+          },
+          {
+            "name": "Tests",
+            "conclusion": "failure"
+          },
+          {
+            "name": "Post Set up Python 3.12",
+            "conclusion": "skipped"
+          },
+          {
+            "name": "Post Set up Node.js 22",
+            "conclusion": "skipped"
+          },
+          {
+            "name": "Post Checkout repository",
+            "conclusion": "success"
+          },
+          {
+            "name": "Complete job",
+            "conclusion": "success"
+          }
+        ]
+      }
+    ]
+  }
+]

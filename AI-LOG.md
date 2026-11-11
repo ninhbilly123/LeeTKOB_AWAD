@@ -164,3 +164,59 @@ Team Members:
 - **Rejected**:
   - **Incident 1 (Test assertion tampering)**: When an authorization test initially failed in local testing, the AI assistant attempted to modify the test assertion from `expect(status).toBe(403)` to `expect(status).toBe(200)` to bypass the failure rather than diagnosing the missing ownership check in the controller. This dangerous evasion was caught immediately in diff review, rejected, and codified directly into the product Never rule: *"Never edit test assertions or remove test cases to bypass CI failure"*.
   - **Incident 2 (Hardcoded backdoor authentication token)**: During middleware prototyping, the assistant proposed inserting a bypass snippet `if (token === "dev-admin") return { role: "admin" }` to simplify manual testing without obtaining real JWT tokens. This critical security hazard was rejected immediately during security audit and codified directly into the Never rule: *"Never hardcode or mock bypass authorization tokens in production middleware"*.
+
+---
+
+## 2026-11-11 — Make quality gates consistent across Windows and Linux
+- **Tool**: Codex.
+- **Asked for**: Fix PA#2 criterion 3 after a Windows checkout failed `npm run format:check` while CI passed the same command.
+- **Kept**:
+  - The four existing root commands and their fail-fast runner.
+  - `.gitattributes` enforcing LF for text files, with CRLF for Windows command scripts.
+  - Explicit `endOfLine: lf` settings in both Prettier configurations.
+- **Changed**:
+  - Normalized the checked TypeScript files from CRLF to LF; test assertions and application behavior are unchanged.
+  - Updated the README to use `npm ci`, match the Node.js/Python versions in CI, and explain Python interpreter selection and formatting an existing checkout.
+- **Rejected**:
+  - Using `endOfLine: auto` as the permanent fix: it accepts whichever line endings happen to be present instead of enforcing one shared format.
+  - Disabling the format gate or changing test expectations to get a green result.
+- **Validation**:
+  - Created a temporary Git snapshot of the changes and cloned it with `core.autocrlf=true`; the checked source and test files were checked out as LF.
+  - Followed the README installation steps (`npm ci` and `python -m pip install ruff mypy pytest`).
+  - All four canonical commands exited successfully on the clean clone: lint (six existing `no-explicit-any` warnings), format check, type check, and tests (16 Gateway, one Web, two Checker).
+  - The working checkout also passed `npm run format:check`; application source and test assertions have no content diff.
+
+
+---
+
+## 2026-11-11 — Repair submission security, contract coverage and PA#2 evidence
+- **Tool**: Codex.
+- **Asked for**: Fix all remaining issues found against the PA#2 rubric, including authentication, idempotency, errors, CI evidence and honest submission documents.
+- **Kept**:
+  - The existing status/body assertions in the original contract suite; request tokens are now signed JWTs rather than magic strings.
+  - Official NestJS `@nestjs/jwt` verification with an HS256 allowlist, expiration and required claims; startup has no fallback signing secret.
+  - The real ownership guard, controller, service and filter in HTTP tests. Seed data and ephemeral signing secrets are injected only from `gateway/test/support/`.
+- **Changed**:
+  - Reproduced and removed the guard's raw-user-ID and magic-token bypass. This is verified incident 1 behind the rules file's Never list.
+  - Reproduced cached responses crossing lab/student boundaries. Keys are now scoped to student ID; hashes include lab ID and code, with 24-hour retention. This is verified incident 2 behind the rules file's Never list.
+  - Moved idempotency after payload validation into synchronous service operations, keeping repeated and concurrent requests to one record in the single-process repository. Durable transactions remain later work.
+  - Shared production/test HTTP configuration captures receipt time before parsing and allows JSON escaping of valid 64 KiB code. Malformed JSON and transport oversize have explicit problem responses.
+  - Replaced raw internal exception messages with the contracted safe 500 response. Added regressions for JWT failures, ownership, cross-user/lab keys, concurrency, TTL, retries after deadline, UTF-8/JSON size and internal failures.
+  - Added the `pa2` tag trigger without renaming the required quality-gate context. Pinned the same Python tools in README, requirements, pyproject and CI. Empty test suites now fail instead of passing silently; the existing e2e config is valid JSON.
+  - Filled PA2.md with verified PR/run/commit links and saved public ruleset/step results. Updated the leader's student ID to 23120314 as supplied by the user.
+  - Replaced the unconditional 100/100 claim with 96/100 and stated the remaining account setup and implementation boundaries.
+- **Rejected**:
+  - Weakening old assertions, mocking the ownership guard, accepting fixture credentials in application code, or returning raw internal failures to clients.
+  - Claiming a provider spending cap exists because it appears in a config comment. The owner confirmed that there is no dedicated LeeTKOB project and the cap is not configured.
+  - Bypassing protected-main review, merging the deliberate broken PR, or describing an alerts-only budget as an enforced spend cap.
+- **Correction of earlier entries**:
+  - Earlier statements that the old guard verified JWTs, that a $10 cap was configured, and that all contract errors were tested were inaccurate for the reviewed commit. The code/test corrections above supersede the implementation claims; provider setup remains explicitly incomplete.
+  - The current PA#2 checker is a placeholder, makes no model calls, and costs $0 in tests. The earlier per-lab cost estimate is withdrawn until real token usage/pricing is measured. No RabbitMQ delivery or durable database integration is claimed by this checkpoint.
+- **Evidence**:
+  - `docs/evidence/main-ruleset.json`, `docs/evidence/ci-evidence.json`, and the Gitleaks scan/report described in `docs/evidence/secret-scan.md`.
+  - Validation results and final submission reference are recorded after the quality gates below complete.
+- **Validation completed**:
+  - All four canonical commands passed on the working checkout and a clean Windows clone with `core.autocrlf=true`, installed with `npm ci` and pinned Python requirements.
+  - Lint: zero warnings. Tests: 37 Gateway, one Web, two Checker (40 total). The additional Gateway e2e command passed one test.
+  - Original contract assertions were retained; only test setup/authentication inputs changed. New tests increase coverage rather than changing expected status codes.
+  - Gitleaks v8.30.1, verified against its official archive checksum, reported no recognized leaks across all reachable refs; report and scope limitations are in `docs/evidence/secret-scan.md`.

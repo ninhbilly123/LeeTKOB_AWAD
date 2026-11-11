@@ -1,3 +1,5 @@
+import { Request } from 'express';
+
 /**
  * Submission entity interfaces and RFC 9457 Problem Details definitions
  * Compliant with docs/contract/post-submissions.md and specs/001-submission-contract-api/data-model.md
@@ -14,6 +16,11 @@ export interface AuthenticatedUser {
   id: string;
   role: UserRole;
   classIds: string[];
+}
+
+export interface AuthenticatedRequest extends Request {
+  user: AuthenticatedUser;
+  receivedAt: number;
 }
 
 export interface Lab {
@@ -42,6 +49,8 @@ export interface Submission {
   idempotencyKey: string;
 }
 
+export type SubmissionResponse = Omit<Submission, 'code'>;
+
 export interface IdempotencyRecord {
   key: string;
   studentId: string;
@@ -49,7 +58,7 @@ export interface IdempotencyRecord {
   payloadHash: string; // SHA-256 hex string
   statusCode: number;
   responseHeaders: Record<string, string>;
-  responseBody: Record<string, any>;
+  responseBody: SubmissionResponse;
   createdAt: string;
   expiresAt: string;
 }
