@@ -49,7 +49,8 @@
 - Setup: [README](README.md#3-fresh-clone-setup); Node dependencies use the lockfile and Python tools use pinned requirements.
 - [Workflow](.github/workflows/ci.yml) runs for PRs to main, pushes to main, and pushes of tag **pa2**.
 - [CI checks for the submitted tag](https://github.com/ninhbilly123/LeeTKOB_AWAD/commit/pa2/checks).
-- [Tag-triggered workflow runs](https://github.com/ninhbilly123/LeeTKOB_AWAD/actions/workflows/ci.yml?query=branch%3Apa2). Open the **Quality Gate CI** run for `pa2`; these stable links resolve to the tagged commit and its actual runs without a self-referential run ID embedded in that same commit. The submission ZIP also includes `PA2_CI_RUN.txt` with the direct run URL, generated after the tag run passes.
+- [CI run for the submitted `pa2` revision (2026-11-11)](https://github.com/ninhbilly123/LeeTKOB_AWAD/actions/runs/42978813279).
+- [Tag-triggered workflow runs](https://github.com/ninhbilly123/LeeTKOB_AWAD/actions/workflows/ci.yml?query=branch%3Apa2). Open **Quality Gate CI** to inspect other runs for `pa2`. CI evidence is recorded directly in this file, as required by the rubric.
 
 ## 6. Contract and reproducible tests
 

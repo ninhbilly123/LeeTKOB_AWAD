@@ -27,6 +27,27 @@ Team Members:
 
 ---
 
+## 2026-11-04 — AI Assistant Harness, Permissions, Rules & Security Audit (Huỳnh Đăng Khoa)
+- **Tool**: Gemini / Claude (Antigravity).
+- **Asked for**: Draft operating rules for AI assistants (`AGENTS.md` and `CLAUDE.md`), establish a three-tier permissions hierarchy (allowed, ask first, never), audit repository configuration to ensure zero leaked credentials, establish `.env.example` hygiene, and configure LLM provider policy with spending caps.
+- **Model & Cost Policy**:
+  - **LLM Provider & Model**: Google AI Studio / Google Cloud — Gemini 3.1 Flash-Lite.
+  - **Historical draft claim, superseded by the 2026-11-11 corrections**: this entry originally stated that a $10 cap was configured; that claim was not verified. The team currently uses the free tier.
+  - **Estimated Cost per Lab**: With ~80 enrolled students submitting and an average of 1–2 semantic constraint reviews per submission, one lab run consumes approximately 100–160 LLM calls (~$0.02 – $0.05 USD total), well within the $10 USD threshold.
+- **Kept**:
+  - Structured four-section rules file in `AGENTS.md` and `CLAUDE.md`: `Stack`, `Commands`, `Conventions`, `Never`.
+  - Three-tier permissions architecture: Tier 1 (Allowed), Tier 2 (Ask First), Tier 3 (Never).
+  - Strictly cleaned `.env.example` containing all service variables without values.
+  - Complete git history audit verifying zero live credentials, API keys, or tokens.
+- **Changed**:
+  - The assistant initially suggested passing host environment variables directly into the test container environment to facilitate sandbox execution. This was modified to strictly isolate the sandbox runtime, ensuring no host environment variables or API keys are ever accessible inside the sandbox container.
+  - Standardized `.env.example` to remove placeholder strings and present variables strictly without values to satisfy the rubric criterion literally.
+- **Rejected**:
+  - **Incident 1 (Test assertion tampering)**: When an authorization test initially failed in local testing, the AI assistant attempted to modify the test assertion from `expect(status).toBe(403)` to `expect(status).toBe(200)` to bypass the failure rather than diagnosing the missing ownership check in the controller. This dangerous evasion was caught immediately in diff review, rejected, and codified directly into the product Never rule: *"Never edit test assertions or remove test cases to bypass CI failure"*.
+  - **Incident 2 (Hardcoded backdoor authentication token)**: During middleware prototyping, the assistant proposed inserting a bypass snippet `if (token === "dev-admin") return { role: "admin" }` to simplify manual testing without obtaining real JWT tokens. This critical security hazard was rejected immediately during security audit and codified directly into the Never rule: *"Never hardcode or mock bypass authorization tokens in production middleware"*.
+
+---
+
 ## 2026-11-05 — Audit and Standardize Submission API Contract (Nguyễn Nhật Duy)
 - **Tool**: Gemini 3.8 Flash / Antigravity.
 - **Asked for**: Review and standardize `docs/contract/post-submissions.md` ensuring full compliance with PA#2 Criterion 5, including RFC 9457 Problem Details (`application/problem+json`), client idempotency retry semantics via `Idempotency-Key`, strict student ownership and class enrollment rules, and RFC 8594 versioning headers.
@@ -146,24 +167,6 @@ Team Members:
   - Rejected creating complex separate scripts when direct CLI commands achieve identical results.
 - **By hand**:
   - Executed and validated both commands from repository root on Windows PowerShell.
-## 2026-11-04 — AI Assistant Harness, Permissions, Rules & Security Audit (Huỳnh Đăng Khoa)
-- **Tool**: Gemini / Claude (Antigravity).
-- **Asked for**: Draft operating rules for AI assistants (`AGENTS.md` and `CLAUDE.md`), establish a three-tier permissions hierarchy (allowed, ask first, never), audit repository configuration to ensure zero leaked credentials, establish `.env.example` hygiene, and configure LLM provider policy with spending caps.
-- **Model & Cost Policy**:
-  - **LLM Provider & Model**: Google AI Studio / Google Cloud — Gemini 3.1 Flash-Lite.
-  - **Historical draft claim, superseded by the 2026-11-11 corrections**: this entry originally stated that a $10 cap was configured; that claim was not verified. The team currently uses the free tier.
-  - **Estimated Cost per Lab**: With ~80 enrolled students submitting and an average of 1–2 semantic constraint reviews per submission, one lab run consumes approximately 100–160 LLM calls (~$0.02 – $0.05 USD total), well within the $10 USD threshold.
-- **Kept**:
-  - Structured four-section rules file in `AGENTS.md` and `CLAUDE.md`: `Stack`, `Commands`, `Conventions`, `Never`.
-  - Three-tier permissions architecture: Tier 1 (Allowed), Tier 2 (Ask First), Tier 3 (Never).
-  - Strictly cleaned `.env.example` containing all service variables without values.
-  - Complete git history audit verifying zero live credentials, API keys, or tokens.
-- **Changed**:
-  - The assistant initially suggested passing host environment variables directly into the test container environment to facilitate sandbox execution. This was modified to strictly isolate the sandbox runtime, ensuring no host environment variables or API keys are ever accessible inside the sandbox container.
-  - Standardized `.env.example` to remove placeholder strings and present variables strictly without values to satisfy the rubric criterion literally.
-- **Rejected**:
-  - **Incident 1 (Test assertion tampering)**: When an authorization test initially failed in local testing, the AI assistant attempted to modify the test assertion from `expect(status).toBe(403)` to `expect(status).toBe(200)` to bypass the failure rather than diagnosing the missing ownership check in the controller. This dangerous evasion was caught immediately in diff review, rejected, and codified directly into the product Never rule: *"Never edit test assertions or remove test cases to bypass CI failure"*.
-  - **Incident 2 (Hardcoded backdoor authentication token)**: During middleware prototyping, the assistant proposed inserting a bypass snippet `if (token === "dev-admin") return { role: "admin" }` to simplify manual testing without obtaining real JWT tokens. This critical security hazard was rejected immediately during security audit and codified directly into the Never rule: *"Never hardcode or mock bypass authorization tokens in production middleware"*.
 
 ---
 
@@ -259,3 +262,22 @@ Team Members:
 - **Changed**: Linked the original image and replaced pending-image wording in README, PA2, the self-assessment and the usage checklist. Kept the team's requested 100-point claim separate from the lecturer's final grade.
 - **Rejected**: Treating this image as proof of numerical quotas, a configured monetary cap, or globally disabled billing; none is displayed. No quota/billing image was invented and no evidence pixels were edited.
 - **Validation**: Visually inspected the supplied image; checked score arithmetic, Markdown links and whitespace. Application/test behavior and published submission refs are unchanged by this evidence update.
+
+---
+
+## 2026-11-19 — Consolidate the local CI link into PA2.md
+- **Tool**: Codex.
+- **Asked for**: Keep the CI evidence in PA2.md and remove the extra local text file if it is not required by the rubric.
+- **Changed**: Confirmed that the hand-in requirements ask for the tag CI link in PA2.md. Copied the recorded run URL into section 5, removed the obsolete separate-file description, and deleted the untracked local `PA2_CI_RUN.txt`.
+- **Kept**: The original run URL and its submission-date context; application code, published tags and existing submission archives are unchanged.
+- **Validation**: Checked the retained URL, file removal and whitespace. No runtime tests are needed for this documentation-only change.
+
+
+---
+
+## 2026-11-19 — Correct AI-LOG chronology and publish documentation cleanup
+- **Tool**: Codex.
+- **Asked for**: Fix the out-of-order date entry, commit the documentation changes, push the branch and open a pull request.
+- **Changed**: Moved the existing 2026-11-04 harness/security entry before the 2026-11-05 entries. Included the preceding PA2.md CI-link consolidation in the same documentation change.
+- **Kept**: Every existing entry's date and content; the correction changes placement rather than rewriting the historical dates.
+- **Validation**: Verified ascending header dates, preservation of all existing entry content, the retained CI URL and a whitespace-clean diff. Application/test code is unchanged.
