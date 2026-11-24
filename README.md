@@ -131,3 +131,24 @@ docker run --rm --network none --memory 512m --pids-limit 64 \
 # Score predictions with the unmodified dev-set scorer
 node leetkob-eval/eval.mjs --data leetkob-eval --predictions predictions-model-off.jsonl
 ```
+
+### Real-Model Dev-Set Run & 80-Submission Cost Arithmetic (PA#3)
+
+- **Evidence folder:** [docs/evidence/pa3-real-run/](docs/evidence/pa3-real-run/)
+  - [predictions.jsonl](docs/evidence/pa3-real-run/predictions.jsonl) (`102` pairs across `47` Accepted solutions)
+  - [eval-report.txt](docs/evidence/pa3-real-run/eval-report.txt) & [eval-summary.json](docs/evidence/pa3-real-run/eval-summary.json)
+  - [call-log.jsonl](docs/evidence/pa3-real-run/call-log.jsonl) (`39` semantic calls; `8` `reverse-recursive` solutions were decided entirely by AST hard rules with `0` LLM calls)
+- **Model used:** Google Gemini API — `gemini-3.1-flash-lite` (invoked via `gemini-3.1-flash-lite-preview`).
+- **Reported `eval.mjs` numbers (`exit 1` in PA#3, where no eval pass threshold applies yet):**
+  - **Wrongful deductions:** `0` (`0/65` pass pairs flagged)
+  - **Recall (violations caught with exact line evidence):** `86.5%` (`32/37`)
+  - **Unsure rate:** `6.9%` (`7/102`, caused by `5` `PROVIDER_ERROR` and `2` `TIMEOUT` burst failures caught by guardrails)
+- **Per-call & 80-submission lab cost arithmetic:**
+  - Across the `32` `OK` calls in [call-log.jsonl](docs/evidence/pa3-real-run/call-log.jsonl) (each carrying a real provider `requestId`): `27,308` input tokens (`853.375` avg/call) and `3,911` output tokens (`122.219` avg/call).
+  - **Actual spend on Gemini API Free tier:** **$0.00**.
+  - **Estimated paid-tier equivalent** (using reference rates `$0.10 / 1M` input tokens, `$0.40 / 1M` output tokens):
+    - Measured `32` `OK` calls: `(27,308 × 0.10 + 3,911 × 0.40) / 1,000,000 = $0.0042952` (`$0.0001342` per semantic submission).
+    - **1 lab of 80 Accepted submissions** (worst case where all 80 require a semantic LLM call; hard-rule-only labs cost `$0.00`):
+      - `80 × (27,308 / 32) = 68,270` input tokens → `$0.006827`
+      - `80 × (3,911 / 32) = 9,777.5` output tokens → `$0.003911`
+      - **Total estimated paid-tier cost per 80-submission lab: `$0.010738` (~`$0.011 USD`)**.

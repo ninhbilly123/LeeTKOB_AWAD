@@ -360,3 +360,24 @@ Team Members:
   - Verified test-first red run on `checker/tests/test_cli.py` before creating `checker/src/cli.py`.
   - Built `leetkob-checker:pa3` and ran `docker run --rm --network none --memory 512m --pids-limit 64 -e MODEL_OFF=1 -v "$(pwd)/leetkob-eval:/data:ro" leetkob-checker:pa3 --data /data`, scored by `node leetkob-eval/eval.mjs`: 0 wrongful deductions, 15/15 ban-list violations caught, 47/47 semantic pairs `unsure` (exit code `1`, zero schema errors).
   - Ran all four canonical quality gates (`PYTHON=.venv/bin/python npm run lint`, `format:check`, `typecheck`, `test`): all passed (Gateway Jest 37/37, Web Vitest 1/1, Checker Pytest 26/26, `mypy --strict` clean on 13 source files).
+
+---
+
+## 2026-11-24 — Commit Real-Model Dev-Set Eval Run and 80-Submission Cost Arithmetic (K3) (Huỳnh Đăng Khoa)
+- **Tool**: Antigravity (CLI orchestration) + Gemini API (`gemini-3.1-flash-lite` via `gemini-3.1-flash-lite-preview`).
+- **Asked for**: Record the real Gemini API dev-set run (`predictions.jsonl`, `eval.mjs` report/summary, and `call-log.jsonl` with real provider request IDs), compute the 80-submission lab cost arithmetic in `README.md` and `AI-LOG.md`, commit the evidence, push `feat/checker-cli-eval`, and update `TASK-08` on the tracking sheet.
+- **Model & Cost Arithmetic**:
+  - **Model used**: `gemini-3.1-flash-lite` (`gemini-3.1-flash-lite-preview`), free tier (`GEMINI_API_KEY` loaded from gitignored `.env` into shell env only).
+  - **Measured across `32` `OK` semantic calls (`39` semantic calls attempted; `8` `reverse-recursive` solutions decided 100% by AST hard rules with `0` LLM calls)**: `27,308` input tokens (`853.375` avg/call) and `3,911` output tokens (`122.219` avg/call).
+  - **Actual free-tier spend**: `$0.00`.
+  - **Estimated paid-tier equivalent** (`$0.10 / 1M` input, `$0.40 / 1M` output): `$0.0042952` for the `32` `OK` calls (`$0.000134225` per semantic submission). Scaled to **1 lab of 80 Accepted submissions** (assuming all 80 require an LLM semantic check): `80 × (27,308 / 32) = 68,270` input tokens (`$0.006827`) + `80 × (3,911 / 32) = 9,777.5` output tokens (`$0.003911`) = **`$0.010738` (~`$0.011 USD` per lab)**.
+- **Kept**:
+  - Committed the exact run artifacts from `docs/evidence/pa3-real-run/` (`predictions.jsonl`, `call-log.jsonl`, `eval-report.txt`, `eval-summary.json`), reporting `wrongful = 0`, `recall = 86.5% (32/37)`, `unsure = 6.9% (7/102)`.
+  - Verified all `32` `OK` entries in `call-log.jsonl` carry real provider `requestId` values (e.g., `FlEFa7y8EO231e8Pj7aXoQg`), and `0` prompts contain comments (`//`, `/*`) or hard-rule ban-list constraints (`reverse-recursive` had `0` calls).
+- **Changed**:
+  - Updated `README.md` Section 7 with the exact dev-set real-run folder, reported metrics, and 80-submission cost calculation (separating `$0.00` free-tier actual spend from paid-tier estimates).
+- **Rejected**:
+  - Rejected cherry-picking or manually editing `predictions.jsonl` / `eval-report.txt` after the command was pasted twice and the second run hit `5 PROVIDER_ERROR` + `2 TIMEOUT` burst failures on the free tier; kept the actual files on disk and verified that guardrails safely routed all 7 failed calls to `unsure` with `0` wrongful deductions (detected by inspecting `statuses` and `requestId` counts in `call-log.jsonl`).
+- **Validation**:
+  - Re-scored `docs/evidence/pa3-real-run/predictions.jsonl` with `node leetkob-eval/eval.mjs` (`exit 1` in PA#3, matching `0` wrongful, `86.5%` recall, `6.9%` unsure) and verified `eval.mjs`/`labels.jsonl` SHA-256 prefixes remain unmodified (`c836edd8713521bb`, `262cda7b0ef5612e`).
+  - Re-ran all four canonical quality gates (`PYTHON=.venv/bin/python npm run lint`, `format:check`, `typecheck`, `test`): all passed.
