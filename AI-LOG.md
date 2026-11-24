@@ -301,3 +301,13 @@ Team Members:
 - **Changed**: Extracted content from each lecture's `*_files/saved_resource.html` rather than the outer wrapper HTML so actual slide rules were captured accurately.
 - **Rejected**: Dumping all six lectures verbatim into `AGENTS.md`, which would violate Session 03's "keep the rules file short" principle.
 - **Validation**: Verified `docs/engineering-rules.md`, `AGENTS.md`, and `AI-LOG.md` via `git status` and `git diff --stat`. Documentation-only change.
+
+---
+
+## 2026-11-24 — Add standardized workspace skills directory under .agents/skills/ (Phạm An Ninh)
+- **Tool**: Antigravity.
+- **Asked for**: Create a properly structured workspace skills directory for the team based on the proposal and PA#3 rubric.
+- **Kept**: Created `.agents/skills/README.md` and five progressive-disclosure skills (`feature-workflow`, `post-task-handover`, `checker-eval-runner`, `sandbox-security-audit`, `checkpoint-packaging`), each with standard YAML frontmatter (`name`, `description`) and actionable verification steps.
+- **Changed**: Followed Antigravity's `.agents/skills/<skill-name>/SKILL.md` discovery convention so all three team members automatically inherit the skills upon pulling the repo without bloating `AGENTS.md`.
+- **Rejected**: Duplicating general coding conventions inside skill files or packing empty placeholder `scripts/`/`examples/` folders with no content.
+- **Validation**: Verified directory tree, YAML frontmatter, and `git status` on branch `chore/add-workspace-skills`. Documentation/skills-only change.
