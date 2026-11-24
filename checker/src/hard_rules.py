@@ -31,6 +31,10 @@ _KEYWORD_NODE_MAP: dict[str, str] = {
     "goto_statement": "goto",
     "new_expression": "new",
     "delete_expression": "delete",
+    "for_statement": "for",
+    "for_range_loop": "for",
+    "while_statement": "while",
+    "do_statement": "do",
 }
 
 # Non-swap <algorithm> symbols used to distinguish "<algorithm> included only for swap".
@@ -116,6 +120,7 @@ class _Occurrence:
     line: int
     qualified: bool
     enclosing_namespace: str
+    member_access: bool = False
 
 
 @dataclass(slots=True)
@@ -128,6 +133,7 @@ class _CppProgramIndex:
     macro_bodies: dict[str, str] = field(default_factory=dict)
     user_defined_global: set[str] = field(default_factory=set)
     user_defined_by_ns: dict[str, set[str]] = field(default_factory=dict)
+    user_defined_methods: set[str] = field(default_factory=set)
     occurrences: list[_Occurrence] = field(default_factory=list)
     keyword_lines: dict[str, list[int]] = field(default_factory=dict)
     uses_swap: bool = False
@@ -185,6 +191,7 @@ def _extract_declarator_name(source_bytes: bytes, node: Node) -> str | None:
             "reference_declarator",
             "parenthesized_declarator",
             "identifier",
+            "field_identifier",
         }:
             name = _extract_declarator_name(source_bytes, child)
             if name:
@@ -243,27 +250,37 @@ def _index_cpp(source_code: str) -> _CppProgramIndex:
         else:
             index.user_defined_global.add(name)
 
-    def collect_user_defs(node: Node, ns_stack: list[str]) -> None:
+    def collect_user_defs(node: Node, ns_stack: list[str], in_record: bool = False) -> None:
         if node.type in _IGNORED_SUBTREE_TYPES:
             return
         if node.type == "namespace_definition":
             name_node = node.child_by_field_name("name")
             next_stack = ns_stack + ([_node_text(source_bytes, name_node)] if name_node else [])
             for child in node.children:
-                collect_user_defs(child, next_stack)
+                collect_user_defs(child, next_stack, in_record)
+            return
+        if node.type in {"struct_specifier", "class_specifier"}:
+            name_node = node.child_by_field_name("name")
+            if name_node is not None:
+                record_user_def(_node_text(source_bytes, name_node), ns_stack)
+            for child in node.children:
+                collect_user_defs(child, ns_stack, in_record=True)
             return
         if node.type == "function_definition":
             decl = node.child_by_field_name("declarator")
             if decl is not None:
                 fn_name = _extract_declarator_name(source_bytes, decl)
                 if fn_name:
-                    record_user_def(fn_name, ns_stack)
-        elif node.type in {"struct_specifier", "class_specifier", "alias_declaration"}:
+                    if in_record:
+                        index.user_defined_methods.add(fn_name)
+                    else:
+                        record_user_def(fn_name, ns_stack)
+        elif node.type == "alias_declaration":
             name_node = node.child_by_field_name("name")
             if name_node is not None:
                 record_user_def(_node_text(source_bytes, name_node), ns_stack)
         for child in node.children:
-            collect_user_defs(child, ns_stack)
+            collect_user_defs(child, ns_stack, in_record)
 
     collect_user_defs(tree.root_node, [])
 
@@ -371,15 +388,30 @@ def _index_cpp(source_code: str) -> _CppProgramIndex:
                             walk(sub, ns_stack)
             return
 
-        if node.type in {"identifier", "type_identifier"} and not _is_declaration_name(node):
+        if node.type in {
+            "identifier",
+            "type_identifier",
+            "field_identifier",
+        } and not _is_declaration_name(node):
             parent = node.parent
-            if (
+            is_member_field = (
                 parent is not None
                 and parent.type == "field_expression"
                 and parent.child_by_field_name("field") == node
-            ):
-                return
+            )
             name = _node_text(source_bytes, node)
+            if is_member_field:
+                if name not in index.user_defined_methods:
+                    index.occurrences.append(
+                        _Occurrence(
+                            canonical_name=name,
+                            line=line,
+                            qualified=False,
+                            enclosing_namespace="::".join(ns_stack),
+                            member_access=True,
+                        )
+                    )
+                return
             enclosing_ns = "::".join(ns_stack)
             if name == "swap" and (
                 "std" in index.using_namespaces or index.using_symbols.get("swap") == "std::swap"
@@ -392,8 +424,11 @@ def _index_cpp(source_code: str) -> _CppProgramIndex:
 
             if name in index.macro_bodies:
                 body = index.macro_bodies[name]
-                for tok in _IDENTIFIER_TOKEN_RE.findall(body):
+                cleaned_body = re.sub(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'', " ", body)
+                for tok in _IDENTIFIER_TOKEN_RE.findall(cleaned_body):
                     clean_tok = tok.lstrip(":")
+                    if clean_tok in _KEYWORD_NODE_MAP.values():
+                        index.keyword_lines.setdefault(clean_tok, []).append(line)
                     index.occurrences.append(
                         _Occurrence(
                             canonical_name=clean_tok,
@@ -467,6 +502,7 @@ def _matches_banned_symbol(index: _CppProgramIndex, target: str) -> list[int]:
                 lines.append(occ.line)
             elif (
                 not occ.qualified
+                and not occ.member_access
                 and occ.canonical_name == short_name
                 and target_ns in index.using_namespaces
                 and not index.has_user_definition(short_name, occ.enclosing_namespace)
@@ -475,8 +511,11 @@ def _matches_banned_symbol(index: _CppProgramIndex, target: str) -> list[int]:
         else:
             if occ.qualified and occ.canonical_name in {target, f"std::{target}"}:
                 lines.append(occ.line)
+            elif occ.member_access and occ.canonical_name == target:
+                lines.append(occ.line)
             elif (
                 not occ.qualified
+                and not occ.member_access
                 and occ.canonical_name == target
                 and not index.has_user_definition(target, occ.enclosing_namespace)
             ):

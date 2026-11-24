@@ -258,3 +258,28 @@ done:
     assert findings[1]["evidence"] == [{"line": 3, "text": "std::vector<int> v = {1, 2};"}]
     assert findings[2]["evidence"] == [{"line": 4, "text": "int* p = (int*)malloc(sizeof(int));"}]
     assert {ev["line"] for ev in findings[3]["evidence"]} == {5, 6}
+
+
+def test_catches_banned_loops_and_reverse_iterator_member_calls() -> None:
+    """Ban lists for loop keywords or rbegin/rend must catch AST, macros, and methods."""
+    code = """
+#include <string>
+#define REP(i, n) for (int i = 0; i < (n); ++i)
+int main() {
+    std::string s = "abc";
+    std::string t(s.rbegin(), s.rend());
+    for (int i = 0; i < 3; ++i) {}
+    while (false) {}
+    do {} while (false);
+    REP(j, 2) {}
+    return 0;
+}
+""".lstrip()
+    constraints: list[ConstraintInput] = [
+        {"id": "C1", "text": "Do not use loop statements: `for`, `while`, `do`-`while`, `goto`."},
+        {"id": "C2", "text": "Do not use reverse iterators (`rbegin`, `rend`)."},
+    ]
+    findings = check_hard_rules(code, constraints)
+    assert [f["verdict"] for f in findings] == ["violation", "violation"]
+    assert {ev["line"] for ev in findings[0]["evidence"]} == {6, 7, 8, 9}
+    assert findings[1]["evidence"] == [{"line": 5, "text": "std::string t(s.rbegin(), s.rend());"}]
