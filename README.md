@@ -99,3 +99,35 @@ The submission endpoint verifies HS256 JWT signatures and expiration using `@nes
 Contract tests generate an ephemeral signing secret and signed JWTs. They inject seeded repositories through Nest's testing module; the application starts with an empty in-memory repository and imports no test fixtures. No API key is needed to run the checks.
 
 Persistence, RabbitMQ delivery, sandbox execution, and the LLM pipeline remain PA#3 work. `QUEUED` is currently the accepted submission state, not evidence of a message delivered to RabbitMQ. Idempotency is atomic for this single-process repository; deployment across processes requires durable storage and a transaction/unique constraint.
+
+---
+
+## 7. Checker CLI & Docker Usage (PA#3)
+
+The Python constraint checker reads `problems/<id>/statement.md`, `problems/<id>/constraints.json`, and `solutions/<id>/*.cpp` without reading labels or requiring per-problem settings.
+
+### Run locally (from `checker/`)
+
+```bash
+# Offline mode (hard rules only, semantic constraints become "unsure")
+MODEL_OFF=1 python3 -m src --data ../leetkob-eval --output ../predictions-model-off.jsonl
+
+# Real Gemini API mode (requires GEMINI_API_KEY in backend environment)
+GEMINI_API_KEY="$GEMINI_API_KEY" python3 -m src --data ../leetkob-eval --output ../predictions.jsonl --call-log ../call-log.jsonl
+```
+
+### Build and run with Docker (`MODEL_OFF=1`, offline)
+
+```bash
+# Build non-root checker image
+docker build -t leetkob-checker ./checker
+
+# Run completely offline with memory and process limits
+docker run --rm --network none --memory 512m --pids-limit 64 \
+  -e MODEL_OFF=1 \
+  -v "$(pwd)/leetkob-eval:/data:ro" \
+  leetkob-checker --data /data > predictions-model-off.jsonl
+
+# Score predictions with the unmodified dev-set scorer
+node leetkob-eval/eval.mjs --data leetkob-eval --predictions predictions-model-off.jsonl
+```

@@ -341,3 +341,22 @@ Team Members:
 - **Validation**:
   - Verified test-first red run on `checker/tests/test_guardrails.py` before writing `checker/src/guardrails.py`.
   - Ran all four canonical quality gates (`PYTHON=.venv/bin/python npm run lint`, `format:check`, `typecheck`, `test`) after final edits: all passed (Gateway Jest 37/37, Web Vitest 1/1, Checker Pytest 23/23, `mypy --strict` clean on 10 source files).
+
+---
+
+## 2026-11-24 — Add Checker Dataset CLI, Non-Root Dockerfile, and Offline MODEL_OFF=1 Verification (K3) (Huỳnh Đăng Khoa)
+- **Tool**: Antigravity.
+- **Asked for**: Implement a single-command dataset CLI (`checker/src/cli.py`), non-root pinned `Dockerfile`, and `MODEL_OFF=1` offline mode on branch `feat/checker-cli-eval`, updating `README.md` with CLI and Docker instructions.
+- **Kept**:
+  - Added `checker/src/cli.py` and `checker/src/__main__.py` accepting `--data` (or positional path), `-o/--output`, `--call-log`, `--model`, `--timeout`, `--delay-ms`, and `MODEL_OFF=1`, reading only `problems/<id>/statement.md`, `problems/<id>/constraints.json`, and `solutions/<id>/*.cpp` (never `labels.jsonl`).
+  - Added `checker/tests/test_cli.py` (3 offline tests written before `cli.py`).
+  - Added `checker/Dockerfile` pinned to `python:3.12-slim-bookworm`, running as non-root `USER 10001:10001`, with `checker/.dockerignore` excluding caches, tests, and `.env*`.
+  - Documented local CLI, Docker build, `docker run --network none` with `MODEL_OFF=1`, and `eval.mjs` verification in `README.md`.
+- **Changed**:
+  - Supported both file output (`--output`) and stdout streaming in `checker/src/cli.py` so `docker run ... -v /path:/data:ro` works cleanly even when the host dataset mount is read-only and the container runs as non-root `10001:10001`.
+- **Rejected**:
+  - Rejected using `:latest` base image or running container as `root`, and rejected baking `.env` or `GEMINI_API_KEY` into the Docker image (enforced via `.dockerignore` and `docs/engineering-rules.md` checks).
+- **Validation**:
+  - Verified test-first red run on `checker/tests/test_cli.py` before creating `checker/src/cli.py`.
+  - Built `leetkob-checker:pa3` and ran `docker run --rm --network none --memory 512m --pids-limit 64 -e MODEL_OFF=1 -v "$(pwd)/leetkob-eval:/data:ro" leetkob-checker:pa3 --data /data`, scored by `node leetkob-eval/eval.mjs`: 0 wrongful deductions, 15/15 ban-list violations caught, 47/47 semantic pairs `unsure` (exit code `1`, zero schema errors).
+  - Ran all four canonical quality gates (`PYTHON=.venv/bin/python npm run lint`, `format:check`, `typecheck`, `test`): all passed (Gateway Jest 37/37, Web Vitest 1/1, Checker Pytest 26/26, `mypy --strict` clean on 13 source files).
