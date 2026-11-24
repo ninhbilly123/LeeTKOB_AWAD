@@ -281,3 +281,23 @@ Team Members:
 - **Changed**: Moved the existing 2026-11-04 harness/security entry before the 2026-11-05 entries. Included the preceding PA2.md CI-link consolidation in the same documentation change.
 - **Kept**: Every existing entry's date and content; the correction changes placement rather than rewriting the historical dates.
 - **Validation**: Verified ascending header dates, preservation of all existing entry content, the retained CI URL and a whitespace-clean diff. Application/test code is unchanged.
+
+---
+
+## 2026-11-24 — Update AGENTS.md with workflow and post-task conventions (Phạm An Ninh)
+- **Tool**: Antigravity.
+- **Asked for**: Add branch/commit conventions, mandatory post-task `AI-LOG.md` update and commit/push/PR confirmation, project tracking Google Sheet logging rules (with exact sheet columns), and `README.md` sync rules to `AGENTS.md`.
+- **Kept**: Concise four-section structure of `AGENTS.md`, expanding Section 3 (`Conventions`) with the four new operational rules.
+- **Changed**: Inspected the live Google Sheet (`phân chia công việc` tab) via `gsheets` CLI to embed the exact 12 column names directly into `AGENTS.md` instead of leaving generic column placeholders. Removed the hardcoded personal email from `AGENTS.md` after review so every team member can log tasks with their own authorized Google account.
+- **Rejected**: Auto-committing or modifying unrelated staged/untracked files (`CLAUDE.md`, `docs/rubric/PA2_rubric.md`) without user confirmation.
+- **Validation**: Checked `git diff` on `AGENTS.md` and `AI-LOG.md`; documentation-only change with no application/test code modified.
+
+---
+
+## 2026-11-24 — Distill CSC13114 lecture rules into docs/engineering-rules.md and AGENTS.md (Phạm An Ninh)
+- **Tool**: Antigravity.
+- **Asked for**: Read all six CSC13114 lecture slide exports (`The Harness`, `Data`, `API Contracts`, `Security`, `Quality Gates`, `Packaging and Release`), consolidate the web engineering rules into `docs/`, and update `AGENTS.md`.
+- **Kept**: Created `docs/engineering-rules.md` organizing all rules by session (Sessions 03–08) and kept `AGENTS.md` short by referencing `docs/engineering-rules.md` while adding high-signal conventions, PA#3 cross-service/FAQ/offline-eval synchronization rules, and PA#3/course-wide `Never` guardrails (no CI silencing, no sandbox escapes, no dev-set overfitting, no unreviewed LLM marks).
+- **Changed**: Extracted content from each lecture's `*_files/saved_resource.html` rather than the outer wrapper HTML so actual slide rules were captured accurately.
+- **Rejected**: Dumping all six lectures verbatim into `AGENTS.md`, which would violate Session 03's "keep the rules file short" principle.
+- **Validation**: Verified `docs/engineering-rules.md`, `AGENTS.md`, and `AI-LOG.md` via `git status` and `git diff --stat`. Documentation-only change.
