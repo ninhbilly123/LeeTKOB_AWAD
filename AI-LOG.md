@@ -301,3 +301,22 @@ Team Members:
 - **Changed**: Extracted content from each lecture's `*_files/saved_resource.html` rather than the outer wrapper HTML so actual slide rules were captured accurately.
 - **Rejected**: Dumping all six lectures verbatim into `AGENTS.md`, which would violate Session 03's "keep the rules file short" principle.
 - **Validation**: Verified `docs/engineering-rules.md`, `AGENTS.md`, and `AI-LOG.md` via `git status` and `git diff --stat`. Documentation-only change.
+
+---
+
+## 2026-11-24 — Define Checker Output Schema and Implement C++ AST Hard-Rule Checker (K1) (Huỳnh Đăng Khoa)
+- **Tool**: Antigravity.
+- **Asked for**: Finalize the shared output schema (`docs/contract/checker-output.md`) for Gateway/Worker/Checker/Eval alignment, then write tests first and implement the C++ AST hard-rule checker (`K1`) on a dedicated branch (`feat/checker-hard-rules`).
+- **Kept**:
+  - Created `docs/contract/checker-output.md` specifying `CheckerResult`, `ConstraintFinding`, `EvidenceLine`, `UnsureReason` (`FAQ-09`), strict no-deduction LLM schema (`FAQ-11`), review queue boundaries (`FAQ-02`, `FAQ-08`, `FAQ-10`, `FAQ-12`), and CLI JSONL prediction format.
+  - Added typed schema definitions in `checker/src/models.py` and syntax-aware C++ AST inspection in `checker/src/hard_rules.py` using `tree-sitter` and `tree-sitter-cpp`, covering comments/strings, user-defined `sort` (namespace/global/method), `<algorithm>` included solely for `std::swap`, `using namespace std;`, `using std::sort;`, namespace aliases, `#define` macros, and function pointers.
+  - Added 11 unit and trap tests in `checker/tests/test_hard_rules.py` before implementing `hard_rules.py`.
+- **Changed**:
+  - Replaced the PA#2 placeholder's string-serialized `"evidence": "[]"` with structured `EvidenceLine` objects (`{"line": int, "text": str}`) and explicit `unsureReason: "MODEL_OFF"` for un-evaluated semantic constraints to align with `docs/contract/checker-output.md` and `FAQ-09`.
+  - Pinned `tree-sitter==0.27.0` and `tree-sitter-cpp==0.23.4` in `checker/requirements.txt` and referenced `-r requirements.txt` from `checker/requirements-dev.txt` so CI installs runtime dependencies cleanly without modifying `.github/workflows/ci.yml`.
+  - Consolidated duplicated `template_type` / `template_function` traversal branches spotted during diff review.
+- **Rejected**:
+  - Rejected raw text/regex scanning for `std::sort` or `#include <algorithm>`, which falsely flags comments, string literals, student-defined `sort`, and `<algorithm>` included only for `std::swap` (detected via AST inspection and trap test cases in `checker/tests/test_hard_rules.py`).
+  - Rejected keeping any `deduction` or `score` field in checker/LLM output schemas (enforcing `FAQ-11` and the PA#3 syllabus rule).
+- **Validation**:
+  - Verified test-first red run (`pytest` collection failed before `hard_rules.py` implementation), then ran all four canonical quality gates (`PYTHON=.venv/bin/python npm run lint`, `format:check`, `typecheck`, `test`): all exited `0` (Gateway Jest 37/37, Web Vitest 1/1, Checker Pytest 11/11, Ruff lint/format clean, `mypy --strict` clean on 4 files).

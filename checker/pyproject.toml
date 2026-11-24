@@ -3,7 +3,10 @@ name = "checker"
 version = "0.0.1"
 description = "LeeTKOB Constraint Checker — hard rules and LLM semantic checking"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+  "tree-sitter==0.27.0",
+  "tree-sitter-cpp==0.23.4",
+]
 
 [project.optional-dependencies]
 dev = [
