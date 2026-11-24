@@ -1,12 +1,13 @@
-"""Orchestrates hard rules first, then LLM semantic constraint checking."""
+"""Orchestrates hard rules first, then LLM semantic constraint checking with guardrails."""
 
 from __future__ import annotations
 
-import json
 import os
+import time
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
+from src.guardrails import make_unsure_findings, validate_and_map_llm_output
 from src.hard_rules import check_hard_rule
 from src.llm_client import (
     DEFAULT_GEMINI_MODEL,
@@ -16,10 +17,10 @@ from src.llm_client import (
     estimate_cost_usd,
 )
 from src.models import (
+    CallStatus,
     CheckerResult,
     ConstraintFinding,
     ConstraintInput,
-    EvidenceLine,
     ModelCallLog,
 )
 from src.sanitizer import PROMPT_VERSION, build_semantic_prompt, sanitize_cpp_source
@@ -28,38 +29,6 @@ from src.sanitizer import PROMPT_VERSION, build_semantic_prompt, sanitize_cpp_so
 def is_model_off() -> bool:
     """Return True when MODEL_OFF=1 (or truthy) disables all LLM calls."""
     return os.environ.get("MODEL_OFF", "").strip().lower() in {"1", "true", "yes"}
-
-
-def _parse_simple_response(
-    raw_text: str,
-    semantic_constraints: Sequence[ConstraintInput],
-    original_lines: list[str],
-) -> list[ConstraintFinding]:
-    """Parse LLM JSON output and map evidence back to original source lines."""
-    data = json.loads(raw_text)
-    by_id: dict[str, ConstraintFinding] = {}
-    for item in data.get("results", []):
-        cid = str(item["constraint"])
-        verdict = item["verdict"]
-        raw_ev = item.get("evidence", [])
-        mapped_ev: list[EvidenceLine] = []
-        for entry in raw_ev:
-            line_no = int(entry["line"])
-            line_text = (
-                original_lines[line_no - 1].strip()
-                if 1 <= line_no <= len(original_lines)
-                else str(entry["text"]).strip()
-            )
-            mapped_ev.append({"line": line_no, "text": line_text})
-        by_id[cid] = {
-            "constraint": cid,
-            "source": "LLM",
-            "verdict": verdict,
-            "evidence": mapped_ev,
-            "unsureReason": "MODEL_UNSURE" if verdict == "unsure" else None,
-            "reason": item.get("reason"),
-        }
-    return [by_id[c["id"]] for c in semantic_constraints]
 
 
 def check_submission(
@@ -101,15 +70,12 @@ def check_submission(
         }
 
     if off:
-        for c in semantic_constraints:
-            findings_by_id[c["id"]] = {
-                "constraint": c["id"],
-                "source": "LLM",
-                "verdict": "unsure",
-                "evidence": [],
-                "unsureReason": "MODEL_OFF",
-                "reason": "Semantic checking skipped because MODEL_OFF=1.",
-            }
+        for f in make_unsure_findings(
+            semantic_constraints,
+            "MODEL_OFF",
+            "Semantic checking skipped because MODEL_OFF=1.",
+        ):
+            findings_by_id[f["constraint"]] = f
         return {
             "submissionId": submission_id,
             "results": [findings_by_id[c["id"]] for c in constraints],
@@ -120,15 +86,12 @@ def check_submission(
         }
 
     if cost_cap_exceeded:
-        for c in semantic_constraints:
-            findings_by_id[c["id"]] = {
-                "constraint": c["id"],
-                "source": "LLM",
-                "verdict": "unsure",
-                "evidence": [],
-                "unsureReason": "COST_CAP_EXCEEDED",
-                "reason": "Lab cost cap exceeded; routed to TA manual review.",
-            }
+        for f in make_unsure_findings(
+            semantic_constraints,
+            "COST_CAP_EXCEEDED",
+            "Lab cost cap exceeded; routed to TA manual review.",
+        ):
+            findings_by_id[f["constraint"]] = f
         return {
             "submissionId": submission_id,
             "results": [findings_by_id[c["id"]] for c in constraints],
@@ -142,31 +105,63 @@ def check_submission(
     prompt = build_semantic_prompt(statement, semantic_constraints, sanitized)
     active_transport = transport if transport is not None else GeminiHttpTransport()
 
-    raw_resp = active_transport.generate(prompt, resolved_model, timeout_seconds)
-    semantic_findings = _parse_simple_response(
-        raw_resp.text, semantic_constraints, sanitized.original_lines
-    )
+    started = time.monotonic()
+    call_status: CallStatus
+    request_id = ""
+    actual_model = resolved_model
+    input_tokens = 0
+    output_tokens = 0
+    latency_ms = 0
+
+    try:
+        raw_resp = active_transport.generate(prompt, resolved_model, timeout_seconds)
+        request_id = raw_resp.request_id
+        actual_model = raw_resp.model
+        input_tokens = raw_resp.input_tokens
+        output_tokens = raw_resp.output_tokens
+        latency_ms = raw_resp.latency_ms
+        semantic_findings, call_status = validate_and_map_llm_output(
+            raw_resp.text,
+            semantic_constraints,
+            sanitized.original_lines,
+            sanitized.sanitized_lines,
+        )
+    except TimeoutError:
+        latency_ms = int((time.monotonic() - started) * 1000)
+        call_status = "TIMEOUT"
+        semantic_findings = make_unsure_findings(
+            semantic_constraints,
+            "TIMEOUT",
+            f"Model call exceeded {timeout_seconds}s timeout limit; routed to TA manual review.",
+        )
+    except Exception as exc:
+        latency_ms = int((time.monotonic() - started) * 1000)
+        call_status = "PROVIDER_ERROR"
+        semantic_findings = make_unsure_findings(
+            semantic_constraints,
+            "PROVIDER_ERROR",
+            f"Model call failed ({type(exc).__name__}); routed to TA manual review.",
+        )
+
     for finding in semantic_findings:
         findings_by_id[finding["constraint"]] = finding
 
     call_log: ModelCallLog = {
-        "requestId": raw_resp.request_id,
-        "model": raw_resp.model,
+        "requestId": request_id,
+        "model": actual_model,
         "constraints": [c["id"] for c in semantic_constraints],
         "sanitizedPrompt": prompt,
-        "inputTokens": raw_resp.input_tokens,
-        "outputTokens": raw_resp.output_tokens,
-        "latencyMs": raw_resp.latency_ms,
-        "estimatedCostUsd": estimate_cost_usd(
-            raw_resp.model, raw_resp.input_tokens, raw_resp.output_tokens
-        ),
-        "status": "OK",
+        "inputTokens": input_tokens,
+        "outputTokens": output_tokens,
+        "latencyMs": latency_ms,
+        "estimatedCostUsd": estimate_cost_usd(actual_model, input_tokens, output_tokens),
+        "status": call_status,
     }
 
     return {
         "submissionId": submission_id,
         "results": [findings_by_id[c["id"]] for c in constraints],
-        "model": raw_resp.model,
+        "model": actual_model,
         "promptVersion": PROMPT_VERSION,
         "checkedAt": checked_at,
         "callLogs": [call_log],

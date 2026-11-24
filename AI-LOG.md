@@ -321,3 +321,23 @@ Team Members:
 - **Validation**:
   - Verified test-first red run (`pytest` collection failed before `hard_rules.py` implementation), then ran all four canonical quality gates (`PYTHON=.venv/bin/python npm run lint`, `format:check`, `typecheck`, `test`): all exited `0` (Gateway Jest 37/37, Web Vitest 1/1, Checker Pytest 11/11, Ruff lint/format clean, `mypy --strict` clean on 4 files).
   - Imported the unmodified `fithcmus/awad-leetkob-eval` dev set into `leetkob-eval/` (`eval.mjs` SHA-256 `c836edd8713521bb...`, `labels.jsonl` SHA-256 `262cda7b0ef5612e...`). Initial eval run caught two missed generic ban-list patterns (C++ loop statements / `#define` loop macros and member iterator calls like `.rbegin()`) plus a struct method trap (`s.sort()`). Fixed all three generically in `checker/src/hard_rules.py` with tests in `checker/tests/test_hard_rules.py` (12/12 Pytest passing). Final dev-set hard-rule eval: **0 wrongful deductions**, **55/55 ban-list pairs decided** (15/15 ban-list violations caught with exact line evidence), and 47/47 semantic pairs routed to `unsure`.
+
+---
+
+## 2026-11-24 — Implement Gemini Semantic Checker, Prompt Sanitizer, and Schema/Timeout Guardrails (K2) (Huỳnh Đăng Khoa)
+- **Tool**: Antigravity.
+- **Asked for**: Implement the LLM semantic constraint pipeline (`K2`) in two separate commits on `feat/checker-model-limits`: (1) sanitized prompt builder + Gemini HTTP transport + orchestrator skipping hard-rule pairs, and (2) tests-first schema validation, evidence verification, and timeout guardrails.
+- **Kept**:
+  - `checker/src/sanitizer.py`: strips C++ comments via `tree-sitter-cpp` byte spans while preserving newlines and 1-based line numbers, redacts student identifiers, strips `deduction` fields from prompt constraints, and wraps code inside `<submission_code>` data tags.
+  - `checker/src/llm_client.py`: Gemini REST transport using stdlib `urllib.request` with `x-goog-api-key` header (read from env only), extracting `responseId` / `x-goog-request-id`, token counts, latency, and estimated USD cost, plus `LlmTransport` protocol for offline `FakeLlmTransport` testing.
+  - `checker/src/guardrails.py` & `checker/src/semantic_checker.py`: strict JSON schema check (`additionalProperties` forbidden, no `deduction`/`score`/`marks`), evidence line bounds/text check mapping back to original source lines, timeout/provider-error/cost-cap/model-off fallbacks routing to `unsure` with `FAQ-09` `unsureReason` codes.
+- **Changed**:
+  - Adjusted the prompt test assertion in `checker/tests/test_semantic_checker.py` from `"deduction" not in sent_prompt` to `'"deduction"' not in sent_prompt` because the system instruction itself explicitly forbids returning a `deduction` field while the `<constraints>` JSON payload excludes the `"deduction"` property.
+  - Extracted shared `make_unsure_findings` helper in `checker/src/guardrails.py` to remove duplicate fallback builders in `checker/src/semantic_checker.py`.
+  - Accepted evidence text matching either the original line or comment-stripped sanitized line, then mapped the saved `evidence[].text` back to the exact original `.cpp` line so `eval.mjs` and TA review never mismatch on trailing comments.
+- **Rejected**:
+  - Rejected passing `GEMINI_API_KEY` in query string parameters (kept in `x-goog-api-key` header so keys never appear in URLs) and rejected adding unpinned third-party HTTP SDKs when Python stdlib `urllib.request` suffices offline.
+  - Rejected calling any real model inside unit tests (detected and enforced via `FakeLlmTransport`, `_TimeoutTransport`, `_ErrorTransport` in `checker/tests/test_semantic_checker.py` and `checker/tests/test_guardrails.py`).
+- **Validation**:
+  - Verified test-first red run on `checker/tests/test_guardrails.py` before writing `checker/src/guardrails.py`.
+  - Ran all four canonical quality gates (`PYTHON=.venv/bin/python npm run lint`, `format:check`, `typecheck`, `test`) after final edits: all passed (Gateway Jest 37/37, Web Vitest 1/1, Checker Pytest 23/23, `mypy --strict` clean on 10 source files).
