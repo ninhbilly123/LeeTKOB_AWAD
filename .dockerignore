@@ -1,0 +1,16 @@
+.git
+.gitignore
+.env
+.env.*
+**/node_modules
+**/dist
+**/coverage
+*.log
+.agents
+.specify
+checker
+docs
+guide
+specs
+web/src
+web/public

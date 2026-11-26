@@ -16,6 +16,7 @@ function loadLocalEnv(): void {
 async function bootstrap() {
   loadLocalEnv();
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
+  app.enableShutdownHooks();
   configureApplication(app);
   await app.listen(process.env.PORT ?? 3000);
 }
