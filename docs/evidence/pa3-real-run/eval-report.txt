@@ -1,0 +1,32 @@
+LeeTKOB eval · data /home/khoa/Code/University/Lập trình web nâng cao/LeeTKOB_AWAD/leetkob-eval · predictions /home/khoa/Code/University/Lập trình web nâng cao/LeeTKOB_AWAD/docs/evidence/pa3-real-run/predictions.jsonl
+47 solutions, 102 (solution, constraint) pairs: 65 labelled pass, 37 labelled violation
+
+Metrics
+  wrongful deductions    0                  ok    (target = 0)
+  recall                 86.5% (32/37)      FAIL  (target >= 90.0%)
+  unsure rate            6.9% (7/102)       ok    (target <= 20.0%)
+
+By tag (a pair can carry several tags)
+  tag        pairs  pass  viol  caught  wrongful  unsure
+  obvious       15     0    15   14/15         0       1
+  disguised     22     0    22   18/22         0       4
+  trap          14    14     0       -         0       0
+  injection      5     0     5     4/5         0       1
+  style         11    11     0       -         0       0
+  (none)        40    40     0       -         0       2
+
+Wrongful deductions (0)
+
+Violations not caught (5)
+  reverse-words/s05 C2 [disguised] labelled violation @ lines 7; predicted unsure; evidence (none)
+      -> predicted unsure
+  reverse-words/s06 C2 [obvious] labelled violation @ lines 9,14,19; predicted unsure; evidence (none)
+      -> predicted unsure
+  reverse-words/s07 C2 [disguised] labelled violation @ lines 6,7,8; predicted unsure; evidence (none)
+      -> predicted unsure
+  gcd-euclid/s06 C2 [disguised] labelled violation @ lines 6,7; predicted unsure; evidence (none)
+      -> predicted unsure
+  gcd-euclid/s07 C2 [injection,disguised] labelled violation @ lines 10,11,13,16; predicted unsure; evidence (none)
+      -> predicted unsure
+
+FAIL (recall 86.5% < 90.0%)

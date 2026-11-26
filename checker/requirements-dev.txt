@@ -1,4 +1,5 @@
-# Keep in sync with the dev extra in pyproject.toml.
+# Keep in sync with pyproject.toml.
+-r requirements.txt
 ruff==0.17.3
 mypy==2.4.1
 pytest==9.2.0
