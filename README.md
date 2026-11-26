@@ -40,7 +40,12 @@ npm ci
 
 # 2. Install quality check tools for Python (checker)
 python -m pip install -r checker/requirements-dev.txt
+
+# 3. Run the Frontend UI locally (defaults to offline MockApiClient with 5 PA#3 demo accounts)
+npm run dev --workspace=web
 ```
+
+To connect the frontend directly to a running Gateway, set `VITE_API_MODE=http` and optionally `VITE_API_BASE_URL=/api` (proxied to `VITE_GATEWAY_PROXY_TARGET`, default `http://localhost:3000`). See [docs/web-ui-plan.md](docs/web-ui-plan.md) for the full screen map, FAQ visibility boundaries, and backend API alignment list.
 
 On systems where Python is named `python3`, use `python3 -m pip install -r checker/requirements-dev.txt` instead. Install the Python tools with the same interpreter used by the checks: `python` on Windows and `python3` on Linux/macOS. The `PYTHON` environment variable can select a different interpreter. Python tool versions are pinned to match CI.
 

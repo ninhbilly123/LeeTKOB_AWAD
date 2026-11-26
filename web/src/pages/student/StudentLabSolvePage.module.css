@@ -1,0 +1,39 @@
+.split {
+  display: grid;
+  grid-template-columns: minmax(360px, 46fr) minmax(400px, 54fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.pane {
+  min-width: 0;
+}
+
+.sampleGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+}
+
+.samplePre {
+  margin: 0.25rem 0 0;
+  padding: 0.6rem 0.75rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  overflow-x: auto;
+  font-size: 0.85rem;
+}
+
+.testChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.6rem;
+}
+
+@media (max-width: 1023px) {
+  .split {
+    grid-template-columns: 1fr;
+  }
+}

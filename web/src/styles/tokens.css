@@ -1,0 +1,58 @@
+:root {
+  color-scheme: light dark;
+
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', Consolas, 'Courier New', monospace;
+
+  --bg-canvas: light-dark(#f8fafc, #0f172a);
+  --bg-surface: light-dark(#ffffff, #1e293b);
+  --bg-subtle: light-dark(#f1f5f9, #162033);
+  --bg-hover: light-dark(#e2e8f0, #273449);
+
+  --text-primary: light-dark(#0f172a, #f8fafc);
+  --text-secondary: light-dark(#334155, #cbd5e1);
+  --text-muted: light-dark(#64748b, #94a3b8);
+
+  --border-subtle: light-dark(#cbd5e1, #334155);
+  --border-strong: light-dark(#94a3b8, #475569);
+
+  --brand-600: light-dark(#1d4ed8, #60a5fa);
+  --brand-700: light-dark(#1e40af, #93c5fd);
+  --brand-soft: light-dark(#dbeafe, #1e3a5f);
+  --brand-on: light-dark(#ffffff, #0f172a);
+
+  /* Semantic verdict & status tokens (WCAG AA >= 4.5:1 text, >= 3:1 border) */
+  --status-pass-bg: light-dark(#dcfce7, #14532d);
+  --status-pass-text: light-dark(#14532d, #bbf7d0);
+  --status-pass-border: light-dark(#15803d, #4ade80);
+
+  --status-fail-bg: light-dark(#fee2e2, #7f1d1d);
+  --status-fail-text: light-dark(#991b1b, #fecaca);
+  --status-fail-border: light-dark(#b91c1c, #f87171);
+
+  --status-warn-bg: light-dark(#fef3c7, #78350f);
+  --status-warn-text: light-dark(#92400e, #fde68a);
+  --status-warn-border: light-dark(#b45309, #fbbf24);
+
+  --status-compile-bg: light-dark(#f3e8ff, #581c87);
+  --status-compile-text: light-dark(#6b21a8, #e9d5ff);
+  --status-compile-border: light-dark(#7e22ce, #c084fc);
+
+  --status-info-bg: light-dark(#dbeafe, #1e3a8a);
+  --status-info-text: light-dark(#1e40af, #bfdbfe);
+  --status-info-border: light-dark(#1d4ed8, #60a5fa);
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --shadow-sm: 0 1px 2px rgb(15 23 42 / 0.08);
+  --shadow-md: 0 6px 20px rgb(15 23 42 / 0.12);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}

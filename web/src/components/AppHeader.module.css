@@ -1,0 +1,120 @@
+.header {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 30;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-sm);
+}
+
+.inner {
+  max-width: 1600px;
+  margin-inline: auto;
+  min-height: 56px;
+  padding: 0.5rem clamp(0.75rem, 2vw, 1.5rem);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.brandGroup {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.brandLink {
+  font-weight: 800;
+  font-size: 1.08rem;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+}
+
+.modeChip {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+}
+
+.navList {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.navLink {
+  display: inline-block;
+  padding: 0.35rem 0.7rem;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.navLink:hover {
+  background: var(--bg-subtle);
+  text-decoration: none;
+}
+
+.navLink[aria-current='page'] {
+  background: var(--brand-soft);
+  color: var(--brand-700);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.roleChip {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--status-info-border);
+  background: var(--status-info-bg);
+  color: var(--status-info-text);
+}
+
+.userName {
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.menuToggle {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .menuToggle {
+    display: inline-flex;
+  }
+
+  .navCollapse {
+    width: 100%;
+    order: 3;
+    border-top: 1px solid var(--border-subtle);
+    padding-top: 0.5rem;
+  }
+
+  .navHidden {
+    display: none;
+  }
+
+  .navList {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
