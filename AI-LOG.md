@@ -321,3 +321,10 @@ Team Members:
 - **Validation**:
   - Verified test-first red run (`pytest` collection failed before `hard_rules.py` implementation), then ran all four canonical quality gates (`PYTHON=.venv/bin/python npm run lint`, `format:check`, `typecheck`, `test`): all exited `0` (Gateway Jest 37/37, Web Vitest 1/1, Checker Pytest 11/11, Ruff lint/format clean, `mypy --strict` clean on 4 files).
   - Imported the unmodified `fithcmus/awad-leetkob-eval` dev set into `leetkob-eval/` (`eval.mjs` SHA-256 `c836edd8713521bb...`, `labels.jsonl` SHA-256 `262cda7b0ef5612e...`). Initial eval run caught two missed generic ban-list patterns (C++ loop statements / `#define` loop macros and member iterator calls like `.rbegin()`) plus a struct method trap (`s.sort()`). Fixed all three generically in `checker/src/hard_rules.py` with tests in `checker/tests/test_hard_rules.py` (12/12 Pytest passing). Final dev-set hard-rule eval: **0 wrongful deductions**, **55/55 ban-list pairs decided** (15/15 ban-list violations caught with exact line evidence), and 47/47 semantic pairs routed to `unsure`.
+## 2026-11-24 — Add standardized workspace skills directory under .agents/skills/ (Phạm An Ninh)
+- **Tool**: Antigravity.
+- **Asked for**: Create a properly structured workspace skills directory for the team based on the proposal and PA#3 rubric.
+- **Kept**: Created `.agents/skills/README.md` and five progressive-disclosure skills (`feature-workflow`, `post-task-handover`, `checker-eval-runner`, `sandbox-security-audit`, `checkpoint-packaging`), each with standard YAML frontmatter (`name`, `description`) and actionable verification steps.
+- **Changed**: Followed Antigravity's `.agents/skills/<skill-name>/SKILL.md` discovery convention so all three team members automatically inherit the skills upon pulling the repo without bloating `AGENTS.md`.
+- **Rejected**: Duplicating general coding conventions inside skill files or packing empty placeholder `scripts/`/`examples/` folders with no content.
+- **Validation**: Verified directory tree, YAML frontmatter, and `git status` on branch `chore/add-workspace-skills`. Documentation/skills-only change.
