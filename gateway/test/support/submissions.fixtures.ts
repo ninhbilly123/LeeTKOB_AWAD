@@ -1,5 +1,7 @@
 import { AuthenticatedUser, Lab, ClassMembership } from '../../src/submissions/submissions.types';
 import { SubmissionStore } from '../../src/submissions/submissions.store';
+import { LabsStore } from '../../src/labs/labs.store';
+import { AuthStore } from '../../src/auth/auth.store';
 
 export const MOCK_LABS: Record<string, Lab> = {
   'lab_018f2d5e-7a91-7f3c-b26a-98124d63e001': {
@@ -74,9 +76,12 @@ MOCK_MEMBERSHIPS.push({
   status: 'ACTIVE',
 });
 
-class TestSubmissionStore extends SubmissionStore {
-  override reset(): void {
-    super.reset(Object.values(MOCK_LABS), MOCK_MEMBERSHIPS);
-  }
+export const authStore = new AuthStore();
+export const labsStore = new LabsStore();
+export const submissionStore = new SubmissionStore(labsStore);
+
+export function resetAllStores(): void {
+  authStore.seedDefaults(MOCK_MEMBERSHIPS);
+  labsStore.resetLabs(Object.values(MOCK_LABS));
+  submissionStore.resetSubmissions();
 }
-export const submissionStore = new TestSubmissionStore();
