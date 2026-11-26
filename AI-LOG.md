@@ -381,3 +381,10 @@ Team Members:
 - **Validation**:
   - Re-scored `docs/evidence/pa3-real-run/predictions.jsonl` with `node leetkob-eval/eval.mjs` (`exit 1` in PA#3, matching `0` wrongful, `86.5%` recall, `6.9%` unsure) and verified `eval.mjs`/`labels.jsonl` SHA-256 prefixes remain unmodified (`c836edd8713521bb`, `262cda7b0ef5612e`).
   - Re-ran all four canonical quality gates (`PYTHON=.venv/bin/python npm run lint`, `format:check`, `typecheck`, `test`): all passed.
+## 2026-11-24 — Add standardized workspace skills directory under .agents/skills/ (Phạm An Ninh)
+- **Tool**: Antigravity.
+- **Asked for**: Create a properly structured workspace skills directory for the team based on the proposal and PA#3 rubric.
+- **Kept**: Created `.agents/skills/README.md` and five progressive-disclosure skills (`feature-workflow`, `post-task-handover`, `checker-eval-runner`, `sandbox-security-audit`, `checkpoint-packaging`), each with standard YAML frontmatter (`name`, `description`) and actionable verification steps.
+- **Changed**: Followed Antigravity's `.agents/skills/<skill-name>/SKILL.md` discovery convention so all three team members automatically inherit the skills upon pulling the repo without bloating `AGENTS.md`.
+- **Rejected**: Duplicating general coding conventions inside skill files or packing empty placeholder `scripts/`/`examples/` folders with no content.
+- **Validation**: Verified directory tree, YAML frontmatter, and `git status` on branch `chore/add-workspace-skills`. Documentation/skills-only change.
