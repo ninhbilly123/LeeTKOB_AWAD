@@ -25,7 +25,7 @@ export class SubmissionsController {
   @Post(':labId/submissions')
   @HttpCode(201)
   @UseGuards(ClassOwnershipGuard)
-  createSubmission(
+  async createSubmission(
     @Param('labId') labId: string,
     @Body() body: Record<string, unknown>,
     @Headers('idempotency-key') idempotencyKey: string,
@@ -86,7 +86,7 @@ export class SubmissionsController {
     }
 
     const studentId = req.user.id;
-    const result = this.submissionsService.createSubmission(
+    const result = await this.submissionsService.createSubmission(
       labId,
       studentId,
       body.code,
