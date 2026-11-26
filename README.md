@@ -99,3 +99,56 @@ The submission endpoint verifies HS256 JWT signatures and expiration using `@nes
 Contract tests generate an ephemeral signing secret and signed JWTs. They inject seeded repositories through Nest's testing module; the application starts with an empty in-memory repository and imports no test fixtures. No API key is needed to run the checks.
 
 Persistence, RabbitMQ delivery, sandbox execution, and the LLM pipeline remain PA#3 work. `QUEUED` is currently the accepted submission state, not evidence of a message delivered to RabbitMQ. Idempotency is atomic for this single-process repository; deployment across processes requires durable storage and a transaction/unique constraint.
+
+---
+
+## 7. Checker CLI & Docker Usage (PA#3)
+
+The Python constraint checker reads `problems/<id>/statement.md`, `problems/<id>/constraints.json`, and `solutions/<id>/*.cpp` without reading labels or requiring per-problem settings.
+
+### Run locally (from `checker/`)
+
+```bash
+# Offline mode (hard rules only, semantic constraints become "unsure")
+MODEL_OFF=1 python3 -m src --data ../leetkob-eval --output ../predictions-model-off.jsonl
+
+# Real Gemini API mode (requires GEMINI_API_KEY in backend environment)
+GEMINI_API_KEY="$GEMINI_API_KEY" python3 -m src --data ../leetkob-eval --output ../predictions.jsonl --call-log ../call-log.jsonl
+```
+
+### Build and run with Docker (`MODEL_OFF=1`, offline)
+
+```bash
+# Build non-root checker image
+docker build -t leetkob-checker ./checker
+
+# Run completely offline with memory and process limits
+docker run --rm --network none --memory 512m --pids-limit 64 \
+  -e MODEL_OFF=1 \
+  -v "$(pwd)/leetkob-eval:/data:ro" \
+  leetkob-checker --data /data > predictions-model-off.jsonl
+
+# Score predictions with the unmodified dev-set scorer
+node leetkob-eval/eval.mjs --data leetkob-eval --predictions predictions-model-off.jsonl
+```
+
+### Real-Model Dev-Set Run & 80-Submission Cost Arithmetic (PA#3)
+
+- **Evidence folder:** [docs/evidence/pa3-real-run/](docs/evidence/pa3-real-run/)
+  - [predictions.jsonl](docs/evidence/pa3-real-run/predictions.jsonl) (`102` pairs across `47` Accepted solutions)
+  - [eval-report.txt](docs/evidence/pa3-real-run/eval-report.txt) & [eval-summary.json](docs/evidence/pa3-real-run/eval-summary.json)
+  - [call-log.jsonl](docs/evidence/pa3-real-run/call-log.jsonl) (`39` semantic calls; `8` `reverse-recursive` solutions were decided entirely by AST hard rules with `0` LLM calls)
+- **Model used:** Google Gemini API — `gemini-3.1-flash-lite` (invoked via `gemini-3.1-flash-lite-preview`).
+- **Reported `eval.mjs` numbers (`exit 1` in PA#3, where no eval pass threshold applies yet):**
+  - **Wrongful deductions:** `0` (`0/65` pass pairs flagged)
+  - **Recall (violations caught with exact line evidence):** `86.5%` (`32/37`)
+  - **Unsure rate:** `6.9%` (`7/102`, caused by `5` `PROVIDER_ERROR` and `2` `TIMEOUT` burst failures caught by guardrails)
+- **Per-call & 80-submission lab cost arithmetic:**
+  - Across the `32` `OK` calls in [call-log.jsonl](docs/evidence/pa3-real-run/call-log.jsonl) (each carrying a real provider `requestId`): `27,308` input tokens (`853.375` avg/call) and `3,911` output tokens (`122.219` avg/call).
+  - **Actual spend on Gemini API Free tier:** **$0.00**.
+  - **Estimated paid-tier equivalent** (using reference rates `$0.10 / 1M` input tokens, `$0.40 / 1M` output tokens):
+    - Measured `32` `OK` calls: `(27,308 × 0.10 + 3,911 × 0.40) / 1,000,000 = $0.0042952` (`$0.0001342` per semantic submission).
+    - **1 lab of 80 Accepted submissions** (worst case where all 80 require a semantic LLM call; hard-rule-only labs cost `$0.00`):
+      - `80 × (27,308 / 32) = 68,270` input tokens → `$0.006827`
+      - `80 × (3,911 / 32) = 9,777.5` output tokens → `$0.003911`
+      - **Total estimated paid-tier cost per 80-submission lab: `$0.010738` (~`$0.011 USD`)**.

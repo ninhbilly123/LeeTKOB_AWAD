@@ -1,0 +1,25 @@
+{
+  "pairs": 102,
+  "passLabels": 65,
+  "violationLabels": 37,
+  "wrongful": 0,
+  "caught": 32,
+  "recall": 0.8648648648648649,
+  "unsure": 7,
+  "unsureRate": 0.06862745098039216,
+  "missing": 0,
+  "thresholds": {
+    "maxWrongful": 0,
+    "minRecall": 0.9,
+    "maxUnsure": 0.2
+  },
+  "pass": false,
+  "wrongfulPairs": [],
+  "missedPairs": [
+    "reverse-words/s05 C2",
+    "reverse-words/s06 C2",
+    "reverse-words/s07 C2",
+    "gcd-euclid/s06 C2",
+    "gcd-euclid/s07 C2"
+  ]
+}
