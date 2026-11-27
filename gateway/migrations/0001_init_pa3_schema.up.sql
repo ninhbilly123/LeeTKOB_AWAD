@@ -1,0 +1,249 @@
+-- Migration: 0001_init_pa3_schema (UP)
+-- Aligned with docs/database-plan.md, docs/engineering-rules.md (Session 04),
+-- docs/proposal/FAQ.md (FAQ-02, FAQ-04, FAQ-05, FAQ-08, FAQ-09, FAQ-10, FAQ-12),
+-- and docs/contract/checker-output.md.
+
+SET lock_timeout = '2s';
+
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  username TEXT NOT NULL UNIQUE CHECK (btrim(username) <> ''),
+  email TEXT NOT NULL UNIQUE CHECK (btrim(email) <> ''),
+  display_name TEXT NOT NULL CHECK (btrim(display_name) <> ''),
+  password_hash TEXT NOT NULL CHECK (btrim(password_hash) <> ''),
+  role TEXT NOT NULL CHECK (role IN ('STUDENT', 'TA', 'ADMIN')),
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS classes (
+  id TEXT PRIMARY KEY,
+  code TEXT NOT NULL UNIQUE CHECK (btrim(code) <> ''),
+  name TEXT NOT NULL CHECK (btrim(name) <> ''),
+  term TEXT NOT NULL CHECK (btrim(term) <> ''),
+  created_by TEXT NULL REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS class_staff (
+  class_id TEXT NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+  ta_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (class_id, ta_id)
+);
+
+CREATE TABLE IF NOT EXISTS class_enrollments (
+  id TEXT PRIMARY KEY,
+  class_id TEXT NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+  student_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status TEXT NOT NULL CHECK (status IN ('ACTIVE', 'DROPPED')),
+  enrolled_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (class_id, student_id)
+);
+
+CREATE TABLE IF NOT EXISTS labs (
+  id TEXT PRIMARY KEY,
+  class_id TEXT NOT NULL REFERENCES classes(id) ON DELETE RESTRICT,
+  title TEXT NOT NULL CHECK (btrim(title) <> ''),
+  statement TEXT NOT NULL DEFAULT '',
+  opened_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  deadline TIMESTAMPTZ NOT NULL,
+  cpu_time_limit_sec INTEGER NOT NULL DEFAULT 1 CHECK (cpu_time_limit_sec BETWEEN 1 AND 5),
+  memory_limit_mb INTEGER NOT NULL DEFAULT 256 CHECK (memory_limit_mb BETWEEN 64 AND 512),
+  max_payload_bytes INTEGER NOT NULL DEFAULT 65536 CHECK (max_payload_bytes = 65536),
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  published_at TIMESTAMPTZ NULL,
+  created_by TEXT NULL REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CHECK (deadline > opened_at)
+);
+
+CREATE TABLE IF NOT EXISTS lab_test_cases (
+  id TEXT PRIMARY KEY,
+  lab_id TEXT NOT NULL REFERENCES labs(id) ON DELETE CASCADE,
+  ordinal INTEGER NOT NULL CHECK (ordinal >= 1),
+  is_hidden BOOLEAN NOT NULL DEFAULT TRUE,
+  input TEXT NOT NULL,
+  expected_output TEXT NOT NULL,
+  UNIQUE (lab_id, ordinal)
+);
+
+-- Deductions stored in centipoints (1000 = 10.00 points, 250 = 2.50 points) per Session 04.
+CREATE TABLE IF NOT EXISTS lab_constraints (
+  id TEXT PRIMARY KEY,
+  lab_id TEXT NOT NULL REFERENCES labs(id) ON DELETE CASCADE,
+  constraint_code TEXT NOT NULL CHECK (btrim(constraint_code) <> ''),
+  check_type TEXT NOT NULL DEFAULT 'SEMANTIC_LLM' CHECK (check_type IN ('HARD_RULE', 'SEMANTIC_LLM')),
+  constraint_text TEXT NOT NULL CHECK (btrim(constraint_text) <> ''),
+  ban_patterns JSONB NOT NULL DEFAULT '[]'::jsonb,
+  deduction_centipoints INTEGER NOT NULL CHECK (deduction_centipoints BETWEEN 0 AND 1000),
+  ordinal INTEGER NOT NULL CHECK (ordinal >= 1),
+  UNIQUE (lab_id, constraint_code),
+  UNIQUE (lab_id, ordinal)
+);
+
+CREATE TABLE IF NOT EXISTS submissions (
+  id TEXT PRIMARY KEY,
+  lab_id TEXT NOT NULL REFERENCES labs(id) ON DELETE RESTRICT,
+  student_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  code TEXT NOT NULL CHECK (btrim(code) <> '' AND octet_length(code) <= 65536),
+  pipeline_status TEXT NOT NULL CHECK (pipeline_status IN ('QUEUED', 'JUDGING', 'COMPLETED', 'JUDGE_ERROR')),
+  overall_verdict TEXT NULL CHECK (overall_verdict IN ('AC', 'WA', 'TLE', 'MLE', 'RE', 'CE')),
+  compile_output TEXT NULL,
+  passed_tests INTEGER NOT NULL DEFAULT 0 CHECK (passed_tests >= 0),
+  total_tests INTEGER NOT NULL DEFAULT 0 CHECK (total_tests >= 0 AND passed_tests <= total_tests),
+  max_time_ms INTEGER NULL CHECK (max_time_ms >= 0),
+  max_memory_kb INTEGER NULL CHECK (max_memory_kb >= 0),
+  is_counting BOOLEAN NOT NULL DEFAULT TRUE,
+  idempotency_key UUID NOT NULL,
+  checker_status TEXT NOT NULL DEFAULT 'NOT_APPLICABLE' CHECK (checker_status IN ('NOT_APPLICABLE', 'PENDING', 'COMPLETED')),
+  submitted_at TIMESTAMPTZ NOT NULL,
+  judged_at TIMESTAMPTZ NULL,
+  CHECK ((pipeline_status = 'COMPLETED') = (overall_verdict IS NOT NULL))
+);
+
+-- Per-test verdicts only; test inputs/outputs are never stored here (FAQ-02).
+CREATE TABLE IF NOT EXISTS submission_test_results (
+  submission_id TEXT NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+  ordinal INTEGER NOT NULL CHECK (ordinal >= 1),
+  verdict TEXT NOT NULL CHECK (verdict IN ('AC', 'WA', 'TLE', 'MLE', 'RE', 'CE')),
+  time_ms INTEGER NULL CHECK (time_ms >= 0),
+  memory_kb INTEGER NULL CHECK (memory_kb >= 0),
+  PRIMARY KEY (submission_id, ordinal)
+);
+
+CREATE TABLE IF NOT EXISTS submission_jobs (
+  id TEXT PRIMARY KEY,
+  submission_id TEXT NOT NULL UNIQUE REFERENCES submissions(id) ON DELETE CASCADE,
+  lab_id TEXT NOT NULL REFERENCES labs(id) ON DELETE CASCADE,
+  stage TEXT NOT NULL DEFAULT 'JUDGE' CHECK (stage IN ('JUDGE', 'CHECK')),
+  status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'PROCESSING', 'DONE', 'FAILED')),
+  attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+  max_attempts INTEGER NOT NULL DEFAULT 3 CHECK (max_attempts >= 1),
+  available_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  locked_by TEXT NULL,
+  locked_at TIMESTAMPTZ NULL,
+  last_error TEXT NULL,
+  payload JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Scoped per student with lab_id FK and lab-included payload_hash per AGENTS.md §4.2
+-- and gateway/test/submission-boundaries.contract.spec.ts (cross-lab key reuse -> 409).
+CREATE TABLE IF NOT EXISTS idempotency_records (
+  student_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  lab_id TEXT NOT NULL REFERENCES labs(id) ON DELETE CASCADE,
+  idempotency_key UUID NOT NULL,
+  payload_hash TEXT NOT NULL,
+  status_code INTEGER NOT NULL CHECK (status_code BETWEEN 200 AND 299),
+  response_headers JSONB NOT NULL,
+  response_body JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (student_id, idempotency_key)
+);
+
+-- Matches docs/contract/checker-output.md (7 UnsureReason codes, Syllabus Rule PENDING_REVIEW).
+CREATE TABLE IF NOT EXISTS constraint_findings (
+  id TEXT PRIMARY KEY,
+  submission_id TEXT NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+  constraint_id TEXT NOT NULL REFERENCES lab_constraints(id) ON DELETE CASCADE,
+  constraint_code TEXT NOT NULL,
+  source TEXT NOT NULL CHECK (source IN ('HARD_RULE', 'LLM')),
+  verdict TEXT NOT NULL CHECK (verdict IN ('pass', 'violation', 'unsure')),
+  unsure_reason TEXT NULL CHECK (
+    unsure_reason IN (
+      'MODEL_UNSURE',
+      'SCHEMA_INVALID',
+      'EVIDENCE_MISMATCH',
+      'TIMEOUT',
+      'COST_CAP_EXCEEDED',
+      'MODEL_OFF',
+      'PROVIDER_ERROR'
+    )
+  ),
+  evidence JSONB NOT NULL DEFAULT '[]'::jsonb,
+  reason TEXT NULL,
+  is_sampled_pass BOOLEAN NOT NULL DEFAULT FALSE,
+  review_status TEXT NOT NULL DEFAULT 'PENDING_REVIEW' CHECK (
+    review_status IN ('NOT_QUEUED', 'PENDING_REVIEW', 'APPROVED_VIOLATION', 'DISMISSED_PASS', 'OVERRIDDEN')
+  ),
+  ta_decision TEXT NULL CHECK (ta_decision IN ('PASS', 'VIOLATION')),
+  ta_deduction_centipoints INTEGER NULL CHECK (ta_deduction_centipoints BETWEEN 0 AND 1000),
+  ta_evidence JSONB NULL,
+  ta_reason TEXT NULL,
+  reviewed_by TEXT NULL REFERENCES users(id) ON DELETE SET NULL,
+  reviewed_at TIMESTAMPTZ NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (submission_id, constraint_id),
+  CHECK ((verdict = 'unsure') = (unsure_reason IS NOT NULL)),
+  CHECK (
+    ta_decision IS DISTINCT FROM 'VIOLATION'
+    OR (jsonb_typeof(ta_evidence) = 'array' AND jsonb_array_length(ta_evidence) >= 1)
+  )
+);
+
+CREATE TABLE IF NOT EXISTS model_call_logs (
+  id TEXT PRIMARY KEY,
+  submission_id TEXT NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+  lab_id TEXT NOT NULL REFERENCES labs(id) ON DELETE CASCADE,
+  request_id TEXT NOT NULL CHECK (btrim(request_id) <> ''),
+  model TEXT NOT NULL CHECK (btrim(model) <> ''),
+  constraints JSONB NOT NULL DEFAULT '[]'::jsonb,
+  sanitized_prompt TEXT NOT NULL,
+  input_tokens INTEGER NOT NULL CHECK (input_tokens >= 0),
+  output_tokens INTEGER NOT NULL CHECK (output_tokens >= 0),
+  latency_ms INTEGER NOT NULL CHECK (latency_ms >= 0),
+  estimated_cost_micros BIGINT NOT NULL DEFAULT 0 CHECK (estimated_cost_micros >= 0),
+  status TEXT NOT NULL CHECK (
+    status IN ('OK', 'SCHEMA_INVALID', 'EVIDENCE_MISMATCH', 'TIMEOUT', 'PROVIDER_ERROR')
+  ),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (submission_id, request_id)
+);
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id TEXT PRIMARY KEY,
+  lab_id TEXT NOT NULL REFERENCES labs(id) ON DELETE CASCADE,
+  submission_id TEXT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+  actor_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  action TEXT NOT NULL CHECK (btrim(action) <> ''),
+  before_state JSONB NULL,
+  after_state JSONB NULL,
+  reason TEXT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Query-driven indexes (equality filters first, range/sort columns last; partial indexes where hot)
+CREATE INDEX IF NOT EXISTS idx_class_staff_ta
+  ON class_staff (ta_id, class_id);
+
+CREATE INDEX IF NOT EXISTS idx_enrollments_student_active
+  ON class_enrollments (student_id, class_id)
+  WHERE status = 'ACTIVE';
+
+CREATE INDEX IF NOT EXISTS idx_labs_class_cursor
+  ON labs (class_id, created_at DESC, id DESC);
+
+-- Database-level enforcement of FAQ-04: at most one counting submission per (lab, student)
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_submissions_counting
+  ON submissions (lab_id, student_id)
+  WHERE is_counting = TRUE;
+
+CREATE INDEX IF NOT EXISTS idx_submissions_student_history
+  ON submissions (lab_id, student_id, submitted_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_submissions_lab_ac
+  ON submissions (lab_id, submitted_at DESC, id DESC)
+  WHERE overall_verdict = 'AC';
+
+CREATE INDEX IF NOT EXISTS idx_jobs_claimable
+  ON submission_jobs (stage, available_at ASC, created_at ASC)
+  WHERE status IN ('PENDING', 'PROCESSING');
+
+CREATE INDEX IF NOT EXISTS idx_findings_pending_by_sub
+  ON constraint_findings (submission_id, review_status);
+
+CREATE INDEX IF NOT EXISTS idx_idempotency_expires
+  ON idempotency_records (expires_at);
