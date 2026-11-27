@@ -335,14 +335,20 @@ All error payloads return `Content-Type: application/problem+json` containing st
 
 ## 6. Durable Storage & Queue Job Contract (Worker Handoff)
 
-### 6.1 Database Schema (PostgreSQL 16)
-When `DATABASE_URL` is configured, Gateway ensures tables exist idempotently (`gateway/src/persistence/schema.ts`):
-1. `users (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, role TEXT NOT NULL, class_ids JSONB NOT NULL DEFAULT '[]'::jsonb)`
-2. `class_memberships (id TEXT PRIMARY KEY, student_id TEXT NOT NULL, class_id TEXT NOT NULL, status TEXT NOT NULL)`
-3. `labs (id TEXT PRIMARY KEY, class_id TEXT NOT NULL, title TEXT NOT NULL, statement TEXT NOT NULL DEFAULT '', deadline TIMESTAMPTZ NOT NULL, max_payload_size INTEGER NOT NULL DEFAULT 65536, is_active BOOLEAN NOT NULL DEFAULT TRUE, test_cases JSONB NOT NULL DEFAULT '[]'::jsonb, constraints JSONB NOT NULL DEFAULT '[]'::jsonb, is_published BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`
-4. `submissions (id TEXT PRIMARY KEY, lab_id TEXT NOT NULL, student_id TEXT NOT NULL, code TEXT NOT NULL, status TEXT NOT NULL, is_counting BOOLEAN NOT NULL DEFAULT TRUE, submitted_at TIMESTAMPTZ NOT NULL, idempotency_key TEXT NOT NULL)`
-5. `submission_jobs (id TEXT PRIMARY KEY, submission_id TEXT NOT NULL UNIQUE, lab_id TEXT NOT NULL, payload JSONB NOT NULL, status TEXT NOT NULL DEFAULT 'PENDING', attempts INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`
-6. `idempotency_records (student_id TEXT NOT NULL, key TEXT NOT NULL, lab_id TEXT NOT NULL, payload_hash TEXT NOT NULL, status_code INTEGER NOT NULL, response_headers JSONB NOT NULL, response_body JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL, expires_at TIMESTAMPTZ NOT NULL, PRIMARY KEY (student_id, key))`
+### 6.1 Database Schema (PostgreSQL 16 — Explicit Migrations)
+Schema is managed via paired `.up.sql` / `.down.sql` migrations in `gateway/migrations/` (`0001_init_pa3_schema.up.sql` with `SET lock_timeout = '2s'`), executed explicitly via `npm run db:migrate --workspace=gateway` (or the `gateway-migrate` one-shot service in `docker-compose.yml`) rather than inside `onModuleInit()`:
+1. `users` (`id`, `username UNIQUE`, `email UNIQUE`, `display_name`, `password_hash`, `role CHECK`, `is_active`, `created_at`)
+2. `classes` (`id`, `code UNIQUE`, `name`, `term`, `created_by FK`, `created_at`)
+3. `class_staff` (`class_id FK`, `ta_id FK`, `PRIMARY KEY (class_id, ta_id)`)
+4. `class_enrollments` (`id`, `class_id FK`, `student_id FK`, `status CHECK`, `UNIQUE (class_id, student_id)`)
+5. `labs` (`id`, `class_id FK`, `title`, `statement`, `opened_at`, `deadline`, `cpu_time_limit_sec CHECK 1..5`, `memory_limit_mb CHECK 64..512`, `max_payload_bytes = 65536`, `is_active`, `published_at`, `created_by FK`)
+6. `lab_test_cases` (`id`, `lab_id FK`, `ordinal`, `is_hidden`, `input`, `expected_output`, `UNIQUE (lab_id, ordinal)`) — student queries filter `is_hidden = FALSE` in SQL (`FAQ-02`).
+7. `lab_constraints` (`id`, `lab_id FK`, `constraint_code`, `check_type`, `constraint_text`, `ban_patterns JSONB`, `deduction_centipoints INTEGER CHECK 0..1000`, `ordinal`, `UNIQUE (lab_id, constraint_code)`)
+8. `submissions` (`id`, `lab_id FK`, `student_id FK`, `code CHECK <= 65536 bytes`, `pipeline_status`, `overall_verdict`, `compile_output`, `passed_tests`, `total_tests`, `max_time_ms`, `max_memory_kb`, `is_counting`, `idempotency_key UUID`, `checker_status`, `submitted_at`, `judged_at`) + partial unique index `uniq_submissions_counting ON submissions (lab_id, student_id) WHERE is_counting = TRUE` (`FAQ-04`).
+9. `submission_test_results` (`submission_id FK`, `ordinal`, `verdict`, `time_ms`, `memory_kb`, `PRIMARY KEY (submission_id, ordinal)`)
+10. `submission_jobs` (`id`, `submission_id FK UNIQUE`, `lab_id FK`, `stage`, `status`, `attempts`, `max_attempts`, `available_at`, `locked_by`, `locked_at`, `last_error`, `payload JSONB`, `created_at`, `updated_at`) — claimed via `FOR UPDATE SKIP LOCKED`.
+11. `idempotency_records` (`student_id FK`, `lab_id FK`, `idempotency_key UUID`, `payload_hash`, `status_code`, `response_headers JSONB`, `response_body JSONB`, `created_at`, `expires_at`, `PRIMARY KEY (student_id, idempotency_key)`).
+12. `constraint_findings`, `model_call_logs`, and `audit_logs` aligned with `docs/contract/checker-output.md` (including all 7 `UnsureReason` values and `PENDING_REVIEW` Syllabus Rule).
 
 ### 6.2 Submission Queue Outbox Payload (Handed off to Task N1 Worker)
 Upon accepting a submission via `POST /labs/{labId}/submissions`, Gateway atomically stores a `PENDING` job into `submission_jobs` containing the payload required by the C++ Sandbox Worker:

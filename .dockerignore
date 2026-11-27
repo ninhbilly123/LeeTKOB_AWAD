@@ -8,9 +8,7 @@
 *.log
 .agents
 .specify
-checker
 docs
 guide
 specs
-web/src
-web/public
+leetkob-eval

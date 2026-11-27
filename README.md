@@ -40,7 +40,15 @@ npm ci
 
 # 2. Install quality check tools for Python (checker)
 python -m pip install -r checker/requirements-dev.txt
+
+# 3. Database migrations & optional PA#3 demo seed (explicit step, never inside npm start)
+npm run db:migrate --workspace=gateway
+npm run db:seed:demo --workspace=gateway
+# Rollback latest migration if needed:
+npm run db:migrate:down --workspace=gateway
 ```
+
+With Docker Compose (`docker compose up --build`), the one-shot `gateway-migrate` service runs `0001_init_pa3_schema.up.sql` after `postgres` becomes healthy and before `gateway` starts. See [docs/database-plan.md](docs/database-plan.md) for the full normalized PostgreSQL 16 schema and index design.
 
 On systems where Python is named `python3`, use `python3 -m pip install -r checker/requirements-dev.txt` instead. Install the Python tools with the same interpreter used by the checks: `python` on Windows and `python3` on Linux/macOS. The `PYTHON` environment variable can select a different interpreter. Python tool versions are pinned to match CI.
 
