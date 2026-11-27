@@ -9,6 +9,7 @@ import {
   PgPoolLike,
   PgQueryResult,
 } from '../src/persistence/postgres.store';
+import { REQUIRED_MIGRATION_VERSION } from '../src/persistence/migrations';
 import { SubmissionStore } from '../src/submissions/submissions.store';
 import { LabsStore } from '../src/labs/labs.store';
 
@@ -87,7 +88,7 @@ describe('Part 3: Persistence, isCounting & Queue Job Handoff', () => {
       expect(submissionStore.getAllJobs()).toHaveLength(3);
     });
 
-    it('enqueues job payload containing lab testCases and constraints matching worker contract', async () => {
+    it('enqueues job payload containing lab testCases, constraints, and FAQ-05 runtime limits', async () => {
       const taRes = await request(app.getHttpServer())
         .post('/auth/login')
         .set('Content-Type', 'application/json')
@@ -104,10 +105,12 @@ describe('Part 3: Persistence, isCounting & Queue Job Handoff', () => {
           title: 'Sort Merge',
           statement: 'Sort N integers using merge sort.',
           deadline: '2099-12-31T23:59:59.000Z',
+          cpuTimeLimitSec: 2,
+          memoryLimitMb: 512,
           testCases: [
             { id: 'tc1', input: '3\n3 1 2\n', expectedOutput: '1 2 3\n', isHidden: true },
           ],
-          constraints: [{ id: 'C1', text: 'Do not call `std::sort`.', deduction: 3 }],
+          constraints: [{ id: 'C1', text: 'Do not call `std::sort`.', deduction: 3.5 }],
         })
         .expect(201);
 
@@ -125,36 +128,40 @@ describe('Part 3: Persistence, isCounting & Queue Job Handoff', () => {
       expect(jobs[0]).toMatchObject({
         submissionId: subRes.body.id,
         labId: labRes.body.id,
-        studentId: 'std_23120244',
-        code: 'int main() { return 0; }',
-        status: 'PENDING',
         limits: {
-          cpuTimeSec: 1,
-          wallTimeSec: 3,
-          memoryMb: 256,
-          maxProcesses: 16,
-          outputLimitBytes: 1048576,
+          cpuTimeSec: 2,
+          memoryMb: 512,
         },
         testCases: [{ id: 'tc1', input: '3\n3 1 2\n', expectedOutput: '1 2 3\n' }],
-        constraints: [{ id: 'C1', text: 'Do not call `std::sort`.', deduction: 3 }],
+        constraints: [{ id: 'C1', text: 'Do not call `std::sort`.', deduction: 3.5 }],
+        status: 'PENDING',
       });
     });
   });
 
-  describe('PostgresPersistence SQL transaction & offline store parity', () => {
-    function createMockPgPool() {
+  describe('PostgreSQL Persistence Adapter (Normalized Schema & Transactions)', () => {
+    function createMockPgPool(options: { migrated?: boolean } = {}) {
       const queries: Array<{ text: string; values?: unknown[] }> = [];
       let failOnNextInsert = false;
+      const migrated = options.migrated ?? true;
 
       const client: PgClientLike = {
         query: async <R extends Record<string, unknown>>(
           text: string,
           values?: unknown[],
         ): Promise<PgQueryResult<R>> => {
-          queries.push({ text: text.replace(/\s+/g, ' ').trim(), values });
+          queries.push({ text: text.trim(), values });
 
           if (failOnNextInsert && text.includes('INSERT INTO submissions')) {
+            failOnNextInsert = false;
             throw new Error('simulated DB failure');
+          }
+
+          if (text.includes('FROM schema_migrations')) {
+            return {
+              rows: migrated ? ([{ version: REQUIRED_MIGRATION_VERSION }] as unknown as R[]) : [],
+              rowCount: migrated ? 1 : 0,
+            };
           }
 
           if (text.includes('FROM idempotency_records')) {
@@ -168,12 +175,44 @@ describe('Part 3: Persistence, isCounting & Queue Job Handoff', () => {
                   class_id: 'class_cs101',
                   title: 'PG Lab',
                   statement: 'Merge Sort',
+                  opened_at: '2026-01-01T00:00:00.000Z',
                   deadline: '2099-12-31T23:59:59.000Z',
-                  max_payload_size: 65536,
+                  cpu_time_limit_sec: 2,
+                  memory_limit_mb: 512,
+                  max_payload_bytes: 65536,
                   is_active: true,
-                  test_cases: [{ id: 'tc1', input: '1', expectedOutput: '1', isHidden: false }],
-                  constraints: [{ id: 'C1', text: 'Do not use `std::sort`.', deduction: 3 }],
-                  is_published: false,
+                  published_at: null,
+                } as unknown as R,
+              ],
+              rowCount: 1,
+            };
+          }
+          if (text.includes('FROM lab_test_cases')) {
+            const rows = text.includes('is_hidden = FALSE')
+              ? [{ id: 'tc1', ordinal: 1, is_hidden: false, input: '1', expected_output: '1' }]
+              : [
+                  { id: 'tc1', ordinal: 1, is_hidden: false, input: '1', expected_output: '1' },
+                  {
+                    id: 'tc2',
+                    ordinal: 2,
+                    is_hidden: true,
+                    input: 'SECRET',
+                    expected_output: 'SECRET_OUT',
+                  },
+                ];
+            return { rows: rows as unknown as R[], rowCount: rows.length };
+          }
+          if (text.includes('FROM lab_constraints')) {
+            return {
+              rows: [
+                {
+                  id: 'con_lab_pg_1_C1',
+                  constraint_code: 'C1',
+                  check_type: 'HARD_RULE',
+                  constraint_text: 'Do not use `std::sort`.',
+                  ban_patterns: ['std::sort'],
+                  deduction_centipoints: 350,
+                  ordinal: 1,
                 } as unknown as R,
               ],
               rowCount: 1,
@@ -199,24 +238,36 @@ describe('Part 3: Persistence, isCounting & Queue Job Handoff', () => {
       };
     }
 
-    it('initializes schema DDL and seeds all 5 demo accounts and default enrollments', async () => {
-      const mock = createMockPgPool();
+    it('verifies connectivity and applied migrations on startup without running DDL or seeding demo users', async () => {
+      const mock = createMockPgPool({ migrated: true });
       const pg = new PostgresPersistence(undefined, mock.pool);
       await pg.onModuleInit();
 
       const allSql = mock.queries.map((q) => q.text).join('\n');
-      expect(allSql).toContain('CREATE TABLE IF NOT EXISTS users');
-      expect(allSql).toContain('CREATE TABLE IF NOT EXISTS class_memberships');
-      expect(allSql).toContain('CREATE TABLE IF NOT EXISTS labs');
-      expect(allSql).toContain('CREATE TABLE IF NOT EXISTS submissions');
-      expect(allSql).toContain('CREATE TABLE IF NOT EXISTS submission_jobs');
-      expect(allSql).toContain('CREATE TABLE IF NOT EXISTS idempotency_records');
-
-      const seedUserInserts = mock.queries.filter((q) => q.text.startsWith('INSERT INTO users'));
-      expect(seedUserInserts).toHaveLength(5);
+      expect(allSql).toContain('SELECT 1');
+      expect(allSql).toContain('FROM schema_migrations');
+      expect(allSql).not.toContain('CREATE TABLE');
+      expect(allSql).not.toContain('INSERT INTO users');
     });
 
-    it('executes atomic transaction flipping is_counting, inserting submission, job outbox, and idempotency record', async () => {
+    it('fails loudly on startup if required schema migration has not been applied', async () => {
+      const mock = createMockPgPool({ migrated: false });
+      const pg = new PostgresPersistence(undefined, mock.pool);
+      await expect(pg.onModuleInit()).rejects.toThrow(/0001_init_pa3_schema/);
+    });
+
+    it('filters hidden test cases at the SQL layer in getStudentLab()', async () => {
+      const mock = createMockPgPool();
+      const pg = new PostgresPersistence(undefined, mock.pool);
+      const studentLab = await pg.getStudentLab('lab_pg_1');
+
+      expect(studentLab?.testCases).toHaveLength(1);
+      expect(studentLab?.testCases?.[0].isHidden).toBe(false);
+      expect(studentLab?.constraints?.[0].deduction).toBe(3.5);
+      expect(mock.queries.some((q) => q.text.includes('is_hidden = FALSE'))).toBe(true);
+    });
+
+    it('executes atomic transaction locking per student, flipping is_counting, inserting submission, job outbox, and idempotency record', async () => {
       const mock = createMockPgPool();
       const pg = new PostgresPersistence(undefined, mock.pool);
       const labsStore = new LabsStore(pg);
@@ -236,7 +287,13 @@ describe('Part 3: Persistence, isCounting & Queue Job Handoff', () => {
 
       const sqlList = mock.queries.map((q) => q.text);
       expect(sqlList[0]).toBe('BEGIN');
-      expect(sqlList.some((s) => s.includes('pg_advisory_xact_lock'))).toBe(true);
+      expect(
+        mock.queries.some(
+          (q) =>
+            q.text.includes('pg_advisory_xact_lock(hashtext($1))') &&
+            q.values?.[0] === 'std_23120244',
+        ),
+      ).toBe(true);
       expect(sqlList.some((s) => s.includes('UPDATE submissions SET is_counting = FALSE'))).toBe(
         true,
       );

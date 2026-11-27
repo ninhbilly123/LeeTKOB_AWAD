@@ -1,12 +1,7 @@
 import { Injectable, Optional } from '@nestjs/common';
-import { DEMO_USERS } from './password.util';
+import { DEMO_ENROLLMENTS, DEMO_USERS } from './password.util';
 import { PostgresPersistence } from '../persistence/postgres.store';
 import { ClassMembership, StoredUser } from '../submissions/submissions.types';
-
-const DEFAULT_DEMO_MEMBERSHIPS: ClassMembership[] = [
-  { id: 'mem_001', studentId: 'std_23120244', classId: 'class_cs101', status: 'ACTIVE' },
-  { id: 'mem_003', studentId: 'std_second_student', classId: 'class_cs101', status: 'ACTIVE' },
-];
 
 /** Dual-mode user store: PostgreSQL when enabled, in-memory for offline tests. */
 @Injectable()
@@ -18,7 +13,7 @@ export class AuthStore {
     this.seedDefaults();
   }
 
-  seedDefaults(memberships: ClassMembership[] = DEFAULT_DEMO_MEMBERSHIPS): void {
+  seedDefaults(memberships: ReadonlyArray<ClassMembership> = DEMO_ENROLLMENTS): void {
     this.users.clear();
     for (const user of DEMO_USERS) {
       this.users.set(user.username, { ...user, classIds: [...user.classIds] });
@@ -60,7 +55,7 @@ export class AuthStore {
     return this.findUserById(id);
   }
 
-  // --- Class Membership ---
+  // --- Class Membership & Staff ---
 
   taClasses(userId: string): string[] {
     const user = this.findUserById(userId);
@@ -71,11 +66,10 @@ export class AuthStore {
   }
 
   async taClassesAsync(userId: string): Promise<string[]> {
-    const user = await this.findUserByIdAsync(userId);
-    if (!user || user.role !== 'TA') {
-      return [];
+    if (this.usePostgres) {
+      return this.postgres!.taClasses(userId);
     }
-    return [...user.classIds];
+    return this.taClasses(userId);
   }
 
   activeClasses(studentId: string): string[] {

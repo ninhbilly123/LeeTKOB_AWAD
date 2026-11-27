@@ -91,11 +91,60 @@ function parseCreateLabPayload(body: Record<string, unknown>): CreateLabInput {
     };
   });
 
+  let openedAt: string | undefined;
+  if (body.openedAt !== undefined) {
+    if (typeof body.openedAt !== 'string' || Number.isNaN(Date.parse(body.openedAt))) {
+      throw problemException(
+        HttpStatus.BAD_REQUEST,
+        'Field openedAt must be a valid ISO 8601 date string.',
+      );
+    }
+    if (Date.parse(body.deadline) <= Date.parse(body.openedAt)) {
+      throw problemException(HttpStatus.BAD_REQUEST, 'Field deadline must be after openedAt.');
+    }
+    openedAt = body.openedAt;
+  }
+
+  let cpuTimeLimitSec: number | undefined;
+  if (body.cpuTimeLimitSec !== undefined) {
+    if (
+      typeof body.cpuTimeLimitSec !== 'number' ||
+      !Number.isInteger(body.cpuTimeLimitSec) ||
+      body.cpuTimeLimitSec < 1 ||
+      body.cpuTimeLimitSec > 5
+    ) {
+      throw problemException(
+        HttpStatus.BAD_REQUEST,
+        'Field cpuTimeLimitSec must be an integer between 1 and 5 (FAQ-05).',
+      );
+    }
+    cpuTimeLimitSec = body.cpuTimeLimitSec;
+  }
+
+  let memoryLimitMb: number | undefined;
+  if (body.memoryLimitMb !== undefined) {
+    if (
+      typeof body.memoryLimitMb !== 'number' ||
+      !Number.isInteger(body.memoryLimitMb) ||
+      body.memoryLimitMb < 64 ||
+      body.memoryLimitMb > 512
+    ) {
+      throw problemException(
+        HttpStatus.BAD_REQUEST,
+        'Field memoryLimitMb must be an integer between 64 and 512 (FAQ-05).',
+      );
+    }
+    memoryLimitMb = body.memoryLimitMb;
+  }
+
   return {
     classId: body.classId.trim(),
     title: body.title.trim(),
     statement: body.statement,
+    openedAt,
     deadline: body.deadline,
+    cpuTimeLimitSec,
+    memoryLimitMb,
     testCases,
     constraints,
   };

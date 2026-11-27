@@ -10,6 +10,7 @@ const errors: Record<number, [string, string]> = {
   413: ['Payload Too Large', 'payload-too-large'],
   415: ['Unsupported Media Type', 'unsupported-media-type'],
   500: ['Internal Server Error', 'internal-server-error'],
+  503: ['Service Unavailable', 'service-unavailable'],
 };
 const internalDetail =
   'An unexpected error occurred while processing the submission. Please retry with the same Idempotency-Key.';

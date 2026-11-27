@@ -15,9 +15,13 @@ export interface LabStudentView {
   classId: string;
   title: string;
   statement: string;
+  openedAt?: string;
   deadline: string;
+  cpuTimeLimitSec: number;
+  memoryLimitMb: number;
   maxPayloadSize: number;
   isActive: boolean;
+  publishedAt: string | null;
   isPublished: boolean;
   constraints: LabConstraint[];
   testCases: LabTestCase[];
@@ -45,12 +49,17 @@ export class LabsService {
       classId: input.classId,
       title: input.title,
       statement: input.statement,
+      openedAt: input.openedAt,
       deadline: input.deadline,
+      cpuTimeLimitSec: input.cpuTimeLimitSec ?? 1,
+      memoryLimitMb: input.memoryLimitMb ?? 256,
       maxPayloadSize: 65536,
       isActive: true,
       testCases: input.testCases,
       constraints: input.constraints,
+      publishedAt: null,
       isPublished: false,
+      createdBy: taUserId,
     };
 
     await this.labsStore.saveLabAsync(lab);
@@ -65,10 +74,8 @@ export class LabsService {
           ? await this.authStore.taClassesAsync(userId)
           : await this.authStore.activeClassesAsync(userId);
 
-    const labs = await this.labsStore.getAllLabsAsync();
-    return labs
-      .filter((lab) => allowedClasses === null || allowedClasses.includes(lab.classId))
-      .map((lab) => (role === 'STUDENT' ? this.toStudentView(lab) : lab));
+    const labs = await this.labsStore.getAllLabsAsync(allowedClasses, role === 'STUDENT');
+    return labs.map((lab) => (role === 'STUDENT' ? this.toStudentView(lab) : lab));
   }
 
   async getLabForUser(
@@ -76,7 +83,10 @@ export class LabsService {
     userId: string,
     role: UserRole,
   ): Promise<Lab | LabStudentView> {
-    const lab = await this.labsStore.getLabAsync(labId);
+    const lab =
+      role === 'STUDENT'
+        ? await this.labsStore.getStudentLabAsync(labId)
+        : await this.labsStore.getLabAsync(labId);
     if (!lab) {
       throw problemException(
         HttpStatus.NOT_FOUND,
@@ -115,10 +125,14 @@ export class LabsService {
       classId: lab.classId,
       title: lab.title,
       statement: lab.statement ?? '',
+      openedAt: lab.openedAt,
       deadline: lab.deadline,
+      cpuTimeLimitSec: lab.cpuTimeLimitSec ?? 1,
+      memoryLimitMb: lab.memoryLimitMb ?? 256,
       maxPayloadSize: lab.maxPayloadSize,
       isActive: lab.isActive,
-      isPublished: lab.isPublished ?? false,
+      publishedAt: lab.publishedAt ?? null,
+      isPublished: lab.isPublished ?? lab.publishedAt != null,
       constraints: lab.constraints ?? [],
       testCases: (lab.testCases ?? []).filter((tc) => !tc.isHidden),
       reviewNotice: REVIEW_NOTICE,

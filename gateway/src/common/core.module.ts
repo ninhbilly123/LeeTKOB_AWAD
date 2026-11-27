@@ -1,6 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { JWT_VERIFICATION_SECRET, jwtVerificationSecret } from './auth.constants';
+import { loadGatewayConfig } from './config';
 import { PostgresPersistence } from '../persistence/postgres.store';
 import { AuthStore } from '../auth/auth.store';
 import { LabsStore } from '../labs/labs.store';
@@ -13,8 +14,12 @@ import { SubmissionStore } from '../submissions/submissions.store';
     {
       provide: PostgresPersistence,
       useFactory: () => {
-        const isJest = Boolean(process.env.JEST_WORKER_ID);
-        return new PostgresPersistence(isJest ? undefined : process.env.DATABASE_URL);
+        const config = loadGatewayConfig();
+        return new PostgresPersistence(
+          config.persistenceMode === 'postgres' ? config.databaseUrl : undefined,
+          undefined,
+          config.dbPool,
+        );
       },
     },
     AuthStore,

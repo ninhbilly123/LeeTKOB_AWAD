@@ -13,7 +13,7 @@ export class LabsStore {
     return Boolean(this.postgres?.isEnabled());
   }
 
-  // --- In-memory helpers (used by tests) ---
+  // --- In-memory helpers (used by offline tests) ---
 
   resetLabs(labs: Lab[] = []): void {
     this.labs.clear();
@@ -45,6 +45,23 @@ export class LabsStore {
     return this.getLab(id);
   }
 
+  /**
+   * Student-safe lab read: filters hidden test cases at the SQL layer when PostgreSQL is enabled.
+   */
+  async getStudentLabAsync(id: string): Promise<Lab | undefined> {
+    if (this.usePostgres) {
+      return this.postgres!.getStudentLab(id);
+    }
+    const lab = this.getLab(id);
+    if (!lab) {
+      return undefined;
+    }
+    return {
+      ...lab,
+      testCases: (lab.testCases ?? []).filter((tc) => !tc.isHidden),
+    };
+  }
+
   async saveLabAsync(lab: Lab): Promise<void> {
     if (this.usePostgres) {
       await this.postgres!.saveLab(lab);
@@ -53,10 +70,22 @@ export class LabsStore {
     this.saveLab(lab);
   }
 
-  async getAllLabsAsync(): Promise<Lab[]> {
+  async getAllLabsAsync(allowedClassIds?: string[] | null, studentOnly = false): Promise<Lab[]> {
     if (this.usePostgres) {
-      return this.postgres!.getAllLabs();
+      return this.postgres!.getAllLabs(allowedClassIds, studentOnly);
     }
-    return this.getAllLabs();
+    const all = this.getAllLabs().filter(
+      (lab) =>
+        allowedClassIds === undefined ||
+        allowedClassIds === null ||
+        allowedClassIds.includes(lab.classId),
+    );
+    if (!studentOnly) {
+      return all;
+    }
+    return all.map((lab) => ({
+      ...lab,
+      testCases: (lab.testCases ?? []).filter((tc) => !tc.isHidden),
+    }));
   }
 }

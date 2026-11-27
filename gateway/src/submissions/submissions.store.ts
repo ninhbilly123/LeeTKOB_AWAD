@@ -8,16 +8,25 @@ import {
 } from '../persistence/postgres.store';
 import { LabsStore } from '../labs/labs.store';
 import {
+  CheckerCompletionInput,
+  ConstraintFindingRecord,
   IdempotencyRecord,
+  JudgeCompletionInput,
   Submission,
   SubmissionJob,
+  SubmissionJobStage,
   SubmissionResponse,
+  SubmissionTestResult,
+  TaFindingReviewInput,
+  TaReviewQueueEntry,
 } from './submissions.types';
 
-/** Dual-mode submission store: PostgreSQL when enabled, in-memory for offline tests. */
+/** Dual-mode submission & worker outbox store: PostgreSQL when enabled, in-memory for offline tests. */
 @Injectable()
 export class SubmissionStore {
   private readonly submissions = new Map<string, Submission>();
+  private readonly testResults = new Map<string, SubmissionTestResult[]>();
+  private readonly findings = new Map<string, ConstraintFindingRecord[]>();
   private readonly jobs = new Map<string, SubmissionJob>();
   private readonly idempotencyRecords = new Map<string, IdempotencyRecord>();
 
@@ -32,6 +41,8 @@ export class SubmissionStore {
 
   resetSubmissions(): void {
     this.submissions.clear();
+    this.testResults.clear();
+    this.findings.clear();
     this.jobs.clear();
     this.idempotencyRecords.clear();
   }
@@ -57,14 +68,229 @@ export class SubmissionStore {
     return [...this.submissions.values()];
   }
 
-  // --- Jobs ---
+  async listStudentSubmissionsAsync(labId: string, studentId: string): Promise<Submission[]> {
+    if (this.usePostgres) {
+      return this.postgres!.listStudentSubmissions(labId, studentId);
+    }
+    return [...this.submissions.values()]
+      .filter((s) => s.labId === labId && s.studentId === studentId)
+      .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt) || b.id.localeCompare(a.id));
+  }
+
+  async getSubmissionTestResultsAsync(submissionId: string): Promise<SubmissionTestResult[]> {
+    if (this.usePostgres) {
+      return this.postgres!.getSubmissionTestResults(submissionId);
+    }
+    return [...(this.testResults.get(submissionId) ?? [])].sort((a, b) => a.ordinal - b.ordinal);
+  }
+
+  // --- Jobs (Worker Outbox for Task N1) ---
 
   getJobsForSubmission(submissionId: string): SubmissionJob[] {
     return [...this.jobs.values()].filter((job) => job.submissionId === submissionId);
   }
 
+  async getJobsForSubmissionAsync(submissionId: string): Promise<SubmissionJob[]> {
+    if (this.usePostgres) {
+      return this.postgres!.getJobsForSubmission(submissionId);
+    }
+    return this.getJobsForSubmission(submissionId);
+  }
+
   getAllJobs(): SubmissionJob[] {
     return [...this.jobs.values()];
+  }
+
+  async claimNextJobAsync(
+    workerId: string,
+    stage: SubmissionJobStage = 'JUDGE',
+  ): Promise<SubmissionJob | null> {
+    if (this.usePostgres) {
+      return this.postgres!.claimNextJob(workerId, stage);
+    }
+    const candidate = [...this.jobs.values()]
+      .filter((j) => (j.stage ?? 'JUDGE') === stage && j.status === 'PENDING')
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
+    if (!candidate) {
+      return null;
+    }
+    candidate.status = 'PROCESSING';
+    candidate.attempts = (candidate.attempts ?? 0) + 1;
+    const sub = this.submissions.get(candidate.submissionId);
+    if (stage === 'JUDGE' && sub && sub.status === 'QUEUED') {
+      sub.status = 'JUDGING';
+    }
+    return { ...candidate };
+  }
+
+  async recordJobFailureAsync(
+    jobId: string,
+    submissionId: string,
+    errorMessage: string,
+    backoffSeconds = 5,
+  ): Promise<'RETRYING' | 'FAILED'> {
+    if (this.usePostgres) {
+      return this.postgres!.recordJobFailure(jobId, submissionId, errorMessage, backoffSeconds);
+    }
+    const job = this.jobs.get(jobId);
+    if (!job) {
+      return 'FAILED';
+    }
+    job.lastError = errorMessage;
+    if ((job.attempts ?? 1) >= 3) {
+      job.status = 'FAILED';
+      const sub = this.submissions.get(submissionId);
+      if (sub && sub.status !== 'COMPLETED') {
+        sub.status = 'JUDGE_ERROR';
+      }
+      return 'FAILED';
+    }
+    job.status = 'PENDING';
+    return 'RETRYING';
+  }
+
+  async recordJudgeResultAsync(input: JudgeCompletionInput): Promise<void> {
+    if (this.usePostgres) {
+      await this.postgres!.recordJudgeResult(input);
+      return;
+    }
+    const sub = this.submissions.get(input.submissionId);
+    if (sub) {
+      sub.status = 'COMPLETED';
+      sub.overallVerdict = input.overallVerdict;
+      sub.compileOutput = input.compileOutput;
+      sub.passedTests = input.testResults.filter((t) => t.verdict === 'AC').length;
+      sub.totalTests = input.testResults.length;
+      sub.maxTimeMs = input.maxTimeMs;
+      sub.maxMemoryKb = input.maxMemoryKb;
+      sub.judgedAt = input.judgedAt;
+      sub.checkerStatus = input.overallVerdict === 'AC' ? 'PENDING' : 'NOT_APPLICABLE';
+    }
+    // Idempotent overwrite by ordinal (N1 redelivery invariant)
+    const dedup = new Map<number, SubmissionTestResult>();
+    for (const tr of input.testResults) {
+      dedup.set(tr.ordinal, { ...tr });
+    }
+    this.testResults.set(
+      input.submissionId,
+      [...dedup.values()].sort((a, b) => a.ordinal - b.ordinal),
+    );
+    const job = [...this.jobs.values()].find((j) => j.submissionId === input.submissionId);
+    if (job) {
+      if (input.overallVerdict === 'AC') {
+        job.stage = 'CHECK';
+        job.status = 'PENDING';
+      } else {
+        job.status = 'DONE';
+      }
+    }
+  }
+
+  async recordCheckerResultAsync(input: CheckerCompletionInput): Promise<void> {
+    if (this.usePostgres) {
+      await this.postgres!.recordCheckerResult(input);
+      return;
+    }
+    const records: ConstraintFindingRecord[] = input.findings.map((f) => {
+      const isQueued =
+        f.verdict === 'violation' || f.verdict === 'unsure' || Boolean(f.isSampledPass);
+      return {
+        id: `fnd_${input.submissionId}_${f.constraintCode}`,
+        submissionId: input.submissionId,
+        constraintId: `con_${input.labId}_${f.constraintCode}`,
+        constraintCode: f.constraintCode,
+        source: f.source,
+        verdict: f.verdict,
+        unsureReason: f.unsureReason,
+        evidence: f.evidence.map((e) => ({ ...e })),
+        reason: f.reason,
+        isSampledPass: Boolean(f.isSampledPass),
+        reviewStatus: isQueued ? 'PENDING_REVIEW' : 'NOT_QUEUED',
+        taDecision: null,
+        taDeduction: null,
+        taEvidence: null,
+        taReason: null,
+        reviewedBy: null,
+        reviewedAt: null,
+      };
+    });
+    this.findings.set(input.submissionId, records);
+
+    // Enforce FAQ-10 10% pass sampling across counting AC submissions in this lab
+    const countingSubs = [...this.submissions.values()].filter(
+      (s) => s.labId === input.labId && s.isCounting && s.overallVerdict === 'AC',
+    );
+    const allPassFindings = countingSubs.flatMap((s) =>
+      (this.findings.get(s.id) ?? []).filter((f) => f.verdict === 'pass'),
+    );
+    const requiredSampled = Math.ceil(0.1 * allPassFindings.length);
+    let currentSampled = allPassFindings.filter((f) => f.isSampledPass).length;
+    for (const pf of allPassFindings) {
+      if (currentSampled >= requiredSampled) break;
+      if (!pf.isSampledPass) {
+        pf.isSampledPass = true;
+        if (pf.reviewStatus === 'NOT_QUEUED') {
+          pf.reviewStatus = 'PENDING_REVIEW';
+        }
+        currentSampled += 1;
+      }
+    }
+
+    const sub = this.submissions.get(input.submissionId);
+    if (sub) {
+      sub.checkerStatus = 'COMPLETED';
+    }
+    const job = [...this.jobs.values()].find((j) => j.submissionId === input.submissionId);
+    if (job) {
+      job.status = 'DONE';
+    }
+  }
+
+  async listLabReviewQueueAsync(
+    labId: string,
+    scope: 'counted' | 'all' = 'counted',
+  ): Promise<TaReviewQueueEntry[]> {
+    if (this.usePostgres) {
+      return this.postgres!.listLabReviewQueue(labId, scope);
+    }
+    return [...this.submissions.values()]
+      .filter((s) => s.labId === labId && s.overallVerdict === 'AC')
+      .filter((s) => (scope === 'counted' ? Boolean(s.isCounting) : true))
+      .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt))
+      .map((sub) => ({
+        submission: { ...sub },
+        findings: (this.findings.get(sub.id) ?? []).map((f) => ({ ...f })),
+      }));
+  }
+
+  async reviewConstraintFindingAsync(
+    input: TaFindingReviewInput,
+  ): Promise<ConstraintFindingRecord> {
+    if (this.usePostgres) {
+      return this.postgres!.reviewConstraintFinding(input);
+    }
+    if (input.decision === 'VIOLATION' && (!input.evidence || input.evidence.length === 0)) {
+      throw problemException(
+        HttpStatus.BAD_REQUEST,
+        'Selecting VIOLATION requires at least one evidence line (FAQ-09).',
+      );
+    }
+    const list = this.findings.get(input.submissionId) ?? [];
+    const target = list.find((f) => f.id === input.findingId);
+    if (!target) {
+      throw problemException(
+        HttpStatus.NOT_FOUND,
+        `Constraint finding '${input.findingId}' was not found.`,
+      );
+    }
+    target.reviewStatus = input.decision === 'VIOLATION' ? 'APPROVED_VIOLATION' : 'DISMISSED_PASS';
+    target.taDecision = input.decision;
+    target.taDeduction = input.decision === 'VIOLATION' ? input.deduction : 0;
+    target.taEvidence = input.evidence ? input.evidence.map((e) => ({ ...e })) : null;
+    target.taReason = input.reason ?? null;
+    target.reviewedBy = input.actorId;
+    target.reviewedAt = new Date().toISOString();
+    return { ...target };
   }
 
   // --- Idempotency ---
