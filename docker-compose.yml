@@ -1,0 +1,63 @@
+services:
+  postgres:
+    image: postgres:16.4-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DATABASE_USER:-leetkob}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}
+      POSTGRES_DB: ${DATABASE_NAME:-leetkob}
+    ports:
+      - '127.0.0.1:${DATABASE_PORT:-5432}:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${DATABASE_USER:-leetkob} -d ${DATABASE_NAME:-leetkob}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Explicit one-shot migration step executed before Gateway starts (Session 04 & 08)
+  gateway-migrate:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    restart: 'no'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      DATABASE_URL: postgresql://${DATABASE_USER:-leetkob}:${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}@postgres:5432/${DATABASE_NAME:-leetkob}
+    command: ['node', 'dist/persistence/migrate.cli.js', 'up']
+
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      gateway-migrate:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: ${PORT:-3000}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      PERSISTENCE_MODE: postgres
+      DATABASE_URL: postgresql://${DATABASE_USER:-leetkob}:${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}@postgres:5432/${DATABASE_NAME:-leetkob}
+      DB_POOL_MAX: ${DB_POOL_MAX:-15}
+    ports:
+      - '${PORT:-3000}:3000'
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'node -e "fetch(''http://127.0.0.1:'' + (process.env.PORT || 3000) + ''/health'').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:

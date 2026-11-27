@@ -388,3 +388,21 @@ Team Members:
 - **Changed**: Followed Antigravity's `.agents/skills/<skill-name>/SKILL.md` discovery convention so all three team members automatically inherit the skills upon pulling the repo without bloating `AGENTS.md`.
 - **Rejected**: Duplicating general coding conventions inside skill files or packing empty placeholder `scripts/`/`examples/` folders with no content.
 - **Validation**: Verified directory tree, YAML frontmatter, and `git status` on branch `chore/add-workspace-skills`. Documentation/skills-only change.
+
+---
+
+## 2026-11-27 — Audit and harden PostgreSQL schema, migrations, worker outbox, and Docker packaging (`feat/database-hardening`) (Phạm An Ninh)
+- **Tool**: Antigravity.
+- **Asked for**: Review the database design and configuration on `origin/feat/auth_and_labs` against project docs/rules (`AGENTS.md`, `docs/engineering-rules.md`, `PA3_rubric.md`, `FAQ.md`, `docs/contract/checker-output.md`), document findings and a remediation plan in `docs/database-plan.md`, and implement the approved fixes on a new branch.
+- **Kept**:
+  - Merged `origin/feat/auth_and_labs` cleanly onto `feat/database-hardening` (branched from `main`) and preserved dual-mode in-memory fallback for 100% offline unit/contract tests.
+  - Replaced runtime `CREATE TABLE` + auto-seeding in `onModuleInit()` with explicit paired SQL migrations (`gateway/migrations/0001_init_pa3_schema.up.sql` and `.down.sql`, `SET lock_timeout = '2s'`), migration CLI (`db:migrate`, `db:migrate:down`), and guarded demo seed CLI (`db:seed:demo`, blocked in production unless `ALLOW_DEMO_SEED=true`).
+  - Normalized the PostgreSQL 16 schema to 14 tables with full `FOREIGN KEY`, `CHECK`, `UNIQUE`, integer `deduction_centipoints` (`0..1000`), SQL-level `is_hidden = FALSE` filtering in `getStudentLab()`, Partial Unique Index `uniq_submissions_counting` (`FAQ-04`), 9 query-driven indexes, and full `constraint_findings` / `model_call_logs` / `audit_logs` tables aligned with `docs/contract/checker-output.md`.
+  - Fixed the `is_counting` concurrency race via per-student `pg_advisory_xact_lock`, added 3-phase worker outbox methods (`claimNextJob` with `FOR UPDATE SKIP LOCKED`, `requeueStaleJobs`, `recordJobFailure` with retry/backoff & terminal `JUDGE_ERROR`, idempotent `recordJudgeResult` & `recordCheckerResult` with `UNIQUE (submission_id, request_id)` and automatic `FAQ-10` 10% `pass` sampling), added `statement` to `SubmissionJob` for `checker/`, eliminated the $N+1$ query in `getAllLabs()` via `ANY($1::text[])` batching, converted `saveLab()` to non-destructive upserts (`ON CONFLICT (id) DO UPDATE`) so `constraint_findings` are never cascade-deleted, added D2 read/review/publish methods (`getSubmissionTestResults`, `listStudentSubmissions`, `listLabReviewQueue`, `reviewConstraintFinding` with DB-enforced `FAQ-09` `ta_evidence` check, `publishLabAtomic`), added startup config validation (`gateway/src/common/config.ts`), upgraded `GET /health` to verify `SELECT 1` (`503` on DB failure), created multi-stage non-root `gateway/Dockerfile`, fixed `.dockerignore`, and added the one-shot `gateway-migrate` service to `docker-compose.yml`.
+- **Changed**:
+  - Kept `idempotency_records` `PRIMARY KEY (student_id, idempotency_key)` with `lab_id REFERENCES labs(id)` and per-student advisory lock after verifying PA#2 regression test `gateway/test/submission-boundaries.contract.spec.ts` explicitly requires cross-lab reuse of the same key by the same student to return `409 idempotency-conflict`.
+  - Removed obsolete `MONGODB_URI=` from `.env.example` and removed deprecated `gateway/src/persistence/schema.ts`.
+- **Rejected**:
+  - Keeping auto-DDL or weak demo password seeding inside `onModuleInit()` (violates Session 04/08 separate migrations and production security hygiene).
+  - Storing lab deductions/scores as floating-point columns or keeping hidden test cases embedded in a `labs.test_cases` JSONB blob.
+- **Validation**: Ran `npm run lint`, `npm run format:check`, `npm run typecheck`, `npm run test` (all Gateway Jest suites including new `database-hardening.spec.ts`, Web Vitest, and Checker Pytest), and `npm run build --workspace=gateway` offline on branch `feat/database-hardening`.
