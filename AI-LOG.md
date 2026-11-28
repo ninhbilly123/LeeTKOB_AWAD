@@ -580,6 +580,7 @@ Team Members:
 ---
 
 ## 2026-11-28 — Complete Task D2: PostgreSQL Publish Gate Fix, FAQ-10 Random Sampling, Audit Logs & Web TA Review / Student Published UI (Phạm An Ninh)
+
 - **Tool**: Antigravity.
 - **Asked for**: Audit Task D2 (`pa3-team-tasks.md`) against `main` (`e507d51`), `PA3_rubric.md`, `FAQ-02/03/04/08/09/10/11/12`, `checker-output.md`, and `.agents/skills/write-api-contract/SKILL.md`, and complete the remaining ~25% gaps across Contract, Gateway, PostgreSQL persistence, Judge worker, and Web UI.
 - **Kept**:
@@ -597,3 +598,24 @@ Team Members:
   - Adding any bulk "Approve All" button for LLM flags on `TaReviewQueuePage.tsx` (forbidden by PA#3 Syllabus Rule).
 - **Validation**:
   - Ran all four canonical root quality gates plus all 3 TS workspace builds and Gateway e2e offline: `npm run lint` (0 errors/warnings across all 4 services), `npm run format:check` (all 4 services clean), `npm run typecheck` (Gateway, Web, Judge `tsc --noEmit` + Checker `mypy --strict` 15 files clean), `npm run test` (Gateway Jest 9 suites / **92 tests**, Web Vitest 2 suites / **11 tests**, Judge Jest 4 suites / **19 tests**, Checker Pytest **30 tests** = **152 passed**), `npm run build --workspace=gateway`, `npm run build --workspace=web`, `npm run build --workspace=judge`, and `npm run test:e2e --workspace=gateway` (1/1 passed).
+
+---
+
+## 2026-11-28 — Implement Task D3: Team-Authored Eval Dataset (`leetkob-eval-team/`) & Offline Integrity Tests (Phạm An Ninh)
+- **Tool**: Antigravity.
+- **Asked for**: Implement Task D3 (`pa3-team-tasks.md`) on branch `feat/d3-team-eval-cases`: create a separate team-authored eval dataset matching the `leetkob-eval/` layout (`problems/`, `solutions/`, `labels.jsonl`) with at least 5 genuinely Accepted C++17 solutions, accurate labels, tags, and evidence lines (including >=1 `trap` and >=1 `injection`), verify zero diff on the lecturer's `leetkob-eval/` files, and hand off for Khoa's Checker CLI run.
+- **Kept**:
+  - Created `leetkob-eval-team/` alongside `leetkob-eval/` with 2 brand-new unseen problems (`stack-brackets` and `kth-element`), 10 test pairs (`01..05.{in,out}` per problem), **8 Accepted C++17 solutions** (`16` `(solution, constraint)` pairs: `10 pass`, `6 violation`), `labels.jsonl`, and `leetkob-eval-team/README.md`:
+    - Covers all 5 official `eval.mjs` tags (`obvious`, `disguised`, `trap`, `injection`, `style`), including **2 traps** (`my::stack` linked list + comment/string mentions; `<algorithm>` solely for `std::swap` + `custom::nth_element`) and **2 prompt injections** (comment + string literal injections disguising pair-erasure and full selection sort).
+  - Added offline verification suite `checker/tests/test_team_dataset.py` (3 pytest tests) asserting SHA-256 integrity of `leetkob-eval/eval.mjs` (`c836edd8713521bb...`) and `leetkob-eval/labels.jsonl` (`262cda7b0ef5612e...`), team dataset schema/coverage, and `MODEL_OFF=1` hard-rule accuracy (`0` wrongful deductions, `100%` ban-list recall with exact line evidence).
+  - Updated `README.md` §7 with CLI + `eval.mjs` commands for `leetkob-eval-team/` and marked Task D3 complete in `docs/task/pa3-team-tasks.md`.
+- **Changed**:
+  - Replaced initial `power-mod` problem idea with `stack-brackets` + `kth-element` during design review because `std::pow` overflows `double` on large modular exponents and would fail to compile/pass as an Accepted solution.
+  - Corrected the pass/violation summary table count in `leetkob-eval-team/README.md` (`10 pass / 6 violation`, matching `eval.mjs` output) after running the unmodified scorer.
+- **Rejected**:
+  - Placing team-authored cases inside `leetkob-eval/` or editing `leetkob-eval/labels.jsonl` (strictly forbidden by PA#3 Criterion 6 and `AGENTS.md` §4.1 Tier 3).
+- **Validation**:
+  - Compiled all 8 `.cpp` files with `g++ -std=c++17 -O2 -Wall -Wextra -Werror` inside Docker (`leetkob-cpp-sandbox:pa3`, `--network none`) and ran all 40 test executions with token-by-token comparison (`8/8 Accepted`, 0 warnings).
+  - Ran `MODEL_OFF=1 python -m src --data ../leetkob-eval-team` and scored with unmodified `node leetkob-eval/eval.mjs --data leetkob-eval-team`: `exit 1` (valid dataset/predictions, never `exit 2`), `0` wrongful deductions, `2/2` ban-list violations caught with exact line text (`stack-brackets/s03 C1` line 7, `kth-element/s03 C1` line 8), `0` false positives on traps, and `8/8` semantic pairs returned `unsure`.
+  - Verified `git diff leetkob-eval/` is empty (`DEV_DIFF_LENGTH=0`) and SHA-256 hashes match byte-for-byte.
+  - Ran all four canonical offline quality gates: `npm run lint`, `npm run format:check`, `npm run typecheck`, `npm run test` (**155/155 passed**: 92 Gateway + 11 Web + 19 Judge + 33 Checker).
