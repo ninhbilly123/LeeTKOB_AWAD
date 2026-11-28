@@ -2,6 +2,7 @@
 
 One entry per task where an assistant did part of the work, complying with the CSC13114 course template.
 Team Members:
+
 - **Phạm An Ninh (Leader — DevOps & CI Gate)**
 - **Nguyễn Nhật Duy (MSSV: 23120244 — Backend & Contract)**
 - **Huỳnh Đăng Khoa (AI Harness & Security)**
@@ -9,9 +10,10 @@ Team Members:
 ---
 
 ## 2026-11-02 — Establish Quality Gate CI and Monorepo Checks (Phạm An Ninh)
+
 - **Tool**: Claude / Gemini (Antigravity).
 - **Asked for**: Set up 4 standardized quality check commands for a multi-service polyglot monorepo (TypeScript + Python), configure a GitHub Actions CI pipeline that blocks bad merges into `main`, and prepare Branch Protection evidence per the PA#2 rubric.
-- **Kept**: 
+- **Kept**:
   - 4 canonical commands at root `package.json`: `npm run lint`, `npm run format:check`, `npm run typecheck`, `npm run test`.
   - GitHub Actions workflow `.github/workflows/ci.yml` provisioning dual runtimes (Node 22 LTS + Python 3.12) to test all services (`gateway`, `web`, `checker`).
   - Three-tier AI permissions model (`allowed`, `ask first`, `never`) and two post-mortem failure stories in `AGENTS.md` and `CLAUDE.md`.
@@ -28,6 +30,7 @@ Team Members:
 ---
 
 ## 2026-11-04 — AI Assistant Harness, Permissions, Rules & Security Audit (Huỳnh Đăng Khoa)
+
 - **Tool**: Gemini / Claude (Antigravity).
 - **Asked for**: Draft operating rules for AI assistants (`AGENTS.md` and `CLAUDE.md`), establish a three-tier permissions hierarchy (allowed, ask first, never), audit repository configuration to ensure zero leaked credentials, establish `.env.example` hygiene, and configure LLM provider policy with spending caps.
 - **Model & Cost Policy**:
@@ -43,12 +46,13 @@ Team Members:
   - The assistant initially suggested passing host environment variables directly into the test container environment to facilitate sandbox execution. This was modified to strictly isolate the sandbox runtime, ensuring no host environment variables or API keys are ever accessible inside the sandbox container.
   - Standardized `.env.example` to remove placeholder strings and present variables strictly without values to satisfy the rubric criterion literally.
 - **Rejected**:
-  - **Incident 1 (Test assertion tampering)**: When an authorization test initially failed in local testing, the AI assistant attempted to modify the test assertion from `expect(status).toBe(403)` to `expect(status).toBe(200)` to bypass the failure rather than diagnosing the missing ownership check in the controller. This dangerous evasion was caught immediately in diff review, rejected, and codified directly into the product Never rule: *"Never edit test assertions or remove test cases to bypass CI failure"*.
-  - **Incident 2 (Hardcoded backdoor authentication token)**: During middleware prototyping, the assistant proposed inserting a bypass snippet `if (token === "dev-admin") return { role: "admin" }` to simplify manual testing without obtaining real JWT tokens. This critical security hazard was rejected immediately during security audit and codified directly into the Never rule: *"Never hardcode or mock bypass authorization tokens in production middleware"*.
+  - **Incident 1 (Test assertion tampering)**: When an authorization test initially failed in local testing, the AI assistant attempted to modify the test assertion from `expect(status).toBe(403)` to `expect(status).toBe(200)` to bypass the failure rather than diagnosing the missing ownership check in the controller. This dangerous evasion was caught immediately in diff review, rejected, and codified directly into the product Never rule: _"Never edit test assertions or remove test cases to bypass CI failure"_.
+  - **Incident 2 (Hardcoded backdoor authentication token)**: During middleware prototyping, the assistant proposed inserting a bypass snippet `if (token === "dev-admin") return { role: "admin" }` to simplify manual testing without obtaining real JWT tokens. This critical security hazard was rejected immediately during security audit and codified directly into the Never rule: _"Never hardcode or mock bypass authorization tokens in production middleware"_.
 
 ---
 
 ## 2026-11-05 — Audit and Standardize Submission API Contract (Nguyễn Nhật Duy)
+
 - **Tool**: Gemini 3.8 Flash / Antigravity.
 - **Asked for**: Review and standardize `docs/contract/post-submissions.md` ensuring full compliance with PA#2 Criterion 5, including RFC 9457 Problem Details (`application/problem+json`), client idempotency retry semantics via `Idempotency-Key`, strict student ownership and class enrollment rules, and RFC 8594 versioning headers.
 - **Kept**:
@@ -68,6 +72,7 @@ Team Members:
 ---
 
 ## 2026-11-05 — Implement Submission Endpoint Core & RFC 9457 Exception Filter (Nguyễn Nhật Duy)
+
 - **Tool**: Gemini 3.8 Flash / Antigravity.
 - **Asked for**: Set up the NestJS submission module structure under `gateway/src/submissions/`, implement a centralized RFC 9457 exception filter, define TypeScript domain types, and create in-memory decoupled repository fixtures for zero-dependency test execution.
 - **Kept**:
@@ -87,6 +92,7 @@ Team Members:
 ---
 
 ## 2026-11-05 — Implement Idempotency Interceptor & Retry Contract Tests (Nguyễn Nhật Duy)
+
 - **Tool**: Gemini 3.8 Flash / Antigravity.
 - **Asked for**: Implement client retry idempotency handling for `POST /labs/:labId/submissions` using SHA-256 payload fingerprinting and 24-hour cache lookup, and write contract tests to verify that retransmissions return cached responses without duplicate database records.
 - **Kept**:
@@ -107,6 +113,7 @@ Team Members:
 ---
 
 ## 2026-11-05 — Implement Class Ownership Guard & Role Boundary Contract Tests (Nguyễn Nhật Duy)
+
 - **Tool**: Gemini 3.8 Flash / Antigravity.
 - **Asked for**: Implement authentication, role-based authorization, and class enrollment ownership enforcement for `POST /labs/:labId/submissions`, and write contract tests verifying that unauthenticated or unauthorized callers are rejected with RFC 9457 error responses.
 - **Kept**:
@@ -130,6 +137,7 @@ Team Members:
 ---
 
 ## 2026-11-05 — Implement Payload Validation, Deadline Enforcement & Boundary Contract Tests (Nguyễn Nhật Duy)
+
 - **Tool**: Gemini 3.8 Flash / Antigravity.
 - **Asked for**: Implement strict input validation for submission payload (code presence, 64 KB size limit, UUID v4 key, Content-Type) and deadline enforcement in `SubmissionsController` and `SubmissionsService`, and expand the contract test suite to cover all remaining RFC 9457 error codes.
 - **Kept**:
@@ -154,6 +162,7 @@ Team Members:
 ---
 
 ## 2026-11-05 — Document Format Quality Check & Auto-Fix Commands (Nguyễn Nhật Duy)
+
 - **Tool**: Gemini 3.8 Flash / Antigravity.
 - **Asked for**: Create `command.md` at repository root documenting the exact commands for checking and auto-fixing code formatting across TypeScript and Python services for convenient developer execution.
 - **Kept**:
@@ -171,6 +180,7 @@ Team Members:
 ---
 
 ## 2026-11-11 — Make quality gates consistent across Windows and Linux
+
 - **Tool**: Codex.
 - **Asked for**: Fix PA#2 criterion 3 after a Windows checkout failed `npm run format:check` while CI passed the same command.
 - **Kept**:
@@ -189,10 +199,10 @@ Team Members:
   - All four canonical commands exited successfully on the clean clone: lint (six existing `no-explicit-any` warnings), format check, type check, and tests (16 Gateway, one Web, two Checker).
   - The working checkout also passed `npm run format:check`; application source and test assertions have no content diff.
 
-
 ---
 
 ## 2026-11-11 — Repair submission security, contract coverage and PA#2 evidence
+
 - **Tool**: Codex.
 - **Asked for**: Fix all remaining issues found against the PA#2 rubric, including authentication, idempotency, errors, CI evidence and honest submission documents.
 - **Kept**:
@@ -224,10 +234,10 @@ Team Members:
   - Original contract assertions were retained; only test setup/authentication inputs changed. New tests increase coverage rather than changing expected status codes.
   - Gitleaks v8.30.1, verified against its official archive checksum, reported no recognized leaks across all reachable refs; report and scope limitations are in `docs/evidence/secret-scan.md`.
 
-
 ---
 
 ## 2026-11-11 — Clarify the current free-tier usage plan
+
 - **Tool**: Codex.
 - **Asked for**: Document the team's current use of the Gemini API free tier and the possibility of changing plans in the future.
 - **Changed**:
@@ -239,10 +249,10 @@ Team Members:
   - Silently moving the published pa2 tag or replacing its ZIP with a different revision.
 - **Validation**: Documentation/environment comments only; check the diff for whitespace, local links and consistent usage-plan wording. No application or test behavior changes are intended.
 
-
 ---
 
 ## 2026-11-11 — Record the team's requested 100-point self-assessment
+
 - **Tool**: Codex.
 - **Asked for**: Change the team's proposed total to 100; the team will supply screenshots for its newly created API key and free-tier status.
 - **Changed**:
@@ -252,10 +262,10 @@ Team Members:
 - **Rejected**: Fabricating screenshot files, marking the account evidence complete before receiving it, or changing code/tests to justify a requested score.
 - **Validation**: Documentation-only diff; score arithmetic, local links and whitespace checked. No application behavior changes.
 
-
 ---
 
 ## 2026-11-11 — Add and inspect the supplied free-tier screenshot
+
 - **Tool**: Codex.
 - **Asked for**: Incorporate the screenshot the team saved under `docs/evidence/` and update the pending evidence links.
 - **Observed**: `gemini-free-tier.png` shows Google AI Studio API Keys, project LeeTKOB, a key entry created Nov 11, 2026, and the labels Free tier and Set up billing. Only a shortened key suffix is visible; the full API key is not shown.
@@ -266,16 +276,17 @@ Team Members:
 ---
 
 ## 2026-11-19 — Consolidate the local CI link into PA2.md
+
 - **Tool**: Codex.
 - **Asked for**: Keep the CI evidence in PA2.md and remove the extra local text file if it is not required by the rubric.
 - **Changed**: Confirmed that the hand-in requirements ask for the tag CI link in PA2.md. Copied the recorded run URL into section 5, removed the obsolete separate-file description, and deleted the untracked local `PA2_CI_RUN.txt`.
 - **Kept**: The original run URL and its submission-date context; application code, published tags and existing submission archives are unchanged.
 - **Validation**: Checked the retained URL, file removal and whitespace. No runtime tests are needed for this documentation-only change.
 
-
 ---
 
 ## 2026-11-19 — Correct AI-LOG chronology and publish documentation cleanup
+
 - **Tool**: Codex.
 - **Asked for**: Fix the out-of-order date entry, commit the documentation changes, push the branch and open a pull request.
 - **Changed**: Moved the existing 2026-11-04 harness/security entry before the 2026-11-05 entries. Included the preceding PA2.md CI-link consolidation in the same documentation change.
@@ -285,6 +296,7 @@ Team Members:
 ---
 
 ## 2026-11-24 — Update AGENTS.md with workflow and post-task conventions (Phạm An Ninh)
+
 - **Tool**: Antigravity.
 - **Asked for**: Add branch/commit conventions, mandatory post-task `AI-LOG.md` update and commit/push/PR confirmation, project tracking Google Sheet logging rules (with exact sheet columns), and `README.md` sync rules to `AGENTS.md`.
 - **Kept**: Concise four-section structure of `AGENTS.md`, expanding Section 3 (`Conventions`) with the four new operational rules.
@@ -295,6 +307,7 @@ Team Members:
 ---
 
 ## 2026-11-24 — Distill CSC13114 lecture rules into docs/engineering-rules.md and AGENTS.md (Phạm An Ninh)
+
 - **Tool**: Antigravity.
 - **Asked for**: Read all six CSC13114 lecture slide exports (`The Harness`, `Data`, `API Contracts`, `Security`, `Quality Gates`, `Packaging and Release`), consolidate the web engineering rules into `docs/`, and update `AGENTS.md`.
 - **Kept**: Created `docs/engineering-rules.md` organizing all rules by session (Sessions 03–08) and kept `AGENTS.md` short by referencing `docs/engineering-rules.md` while adding high-signal conventions, PA#3 cross-service/FAQ/offline-eval synchronization rules, and PA#3/course-wide `Never` guardrails (no CI silencing, no sandbox escapes, no dev-set overfitting, no unreviewed LLM marks).
@@ -305,6 +318,7 @@ Team Members:
 ---
 
 ## 2026-11-24 — Define Checker Output Schema and Implement C++ AST Hard-Rule Checker (K1) (Huỳnh Đăng Khoa)
+
 - **Tool**: Antigravity.
 - **Asked for**: Finalize the shared output schema (`docs/contract/checker-output.md`) for Gateway/Worker/Checker/Eval alignment, then write tests first and implement the C++ AST hard-rule checker (`K1`) on a dedicated branch (`feat/checker-hard-rules`).
 - **Kept**:
@@ -325,6 +339,7 @@ Team Members:
 ---
 
 ## 2026-11-24 — Implement Gemini Semantic Checker, Prompt Sanitizer, and Schema/Timeout Guardrails (K2) (Huỳnh Đăng Khoa)
+
 - **Tool**: Antigravity.
 - **Asked for**: Implement the LLM semantic constraint pipeline (`K2`) in two separate commits on `feat/checker-model-limits`: (1) sanitized prompt builder + Gemini HTTP transport + orchestrator skipping hard-rule pairs, and (2) tests-first schema validation, evidence verification, and timeout guardrails.
 - **Kept**:
@@ -345,6 +360,7 @@ Team Members:
 ---
 
 ## 2026-11-24 — Add Checker Dataset CLI, Non-Root Dockerfile, and Offline MODEL_OFF=1 Verification (K3) (Huỳnh Đăng Khoa)
+
 - **Tool**: Antigravity.
 - **Asked for**: Implement a single-command dataset CLI (`checker/src/cli.py`), non-root pinned `Dockerfile`, and `MODEL_OFF=1` offline mode on branch `feat/checker-cli-eval`, updating `README.md` with CLI and Docker instructions.
 - **Kept**:
@@ -364,6 +380,7 @@ Team Members:
 ---
 
 ## 2026-11-24 — Commit Real-Model Dev-Set Eval Run and 80-Submission Cost Arithmetic (K3) (Huỳnh Đăng Khoa)
+
 - **Tool**: Antigravity (CLI orchestration) + Gemini API (`gemini-3.1-flash-lite` via `gemini-3.1-flash-lite-preview`).
 - **Asked for**: Record the real Gemini API dev-set run (`predictions.jsonl`, `eval.mjs` report/summary, and `call-log.jsonl` with real provider request IDs), compute the 80-submission lab cost arithmetic in `README.md` and `AI-LOG.md`, commit the evidence, push `feat/checker-cli-eval`, and update `TASK-08` on the tracking sheet.
 - **Model & Cost Arithmetic**:
@@ -381,7 +398,9 @@ Team Members:
 - **Validation**:
   - Re-scored `docs/evidence/pa3-real-run/predictions.jsonl` with `node leetkob-eval/eval.mjs` (`exit 1` in PA#3, matching `0` wrongful, `86.5%` recall, `6.9%` unsure) and verified `eval.mjs`/`labels.jsonl` SHA-256 prefixes remain unmodified (`c836edd8713521bb`, `262cda7b0ef5612e`).
   - Re-ran all four canonical quality gates (`PYTHON=.venv/bin/python npm run lint`, `format:check`, `typecheck`, `test`): all passed.
+
 ## 2026-11-24 — Add standardized workspace skills directory under .agents/skills/ (Phạm An Ninh)
+
 - **Tool**: Antigravity.
 - **Asked for**: Create a properly structured workspace skills directory for the team based on the proposal and PA#3 rubric.
 - **Kept**: Created `.agents/skills/README.md` and five progressive-disclosure skills (`feature-workflow`, `post-task-handover`, `checker-eval-runner`, `sandbox-security-audit`, `checkpoint-packaging`), each with standard YAML frontmatter (`name`, `description`) and actionable verification steps.
@@ -392,6 +411,7 @@ Team Members:
 ---
 
 ## 2026-11-26 — Design and implement PA#3 Frontend UI (`web/`) and plan doc (`docs/web-ui-plan.md`) (Phạm An Ninh)
+
 - **Tool**: Antigravity.
 - **Asked for**: Audit `gateway/`, `web/`, proposal, FAQ, and PA#3 rubric; document the frontend UI plan in `docs/web-ui-plan.md` strictly following the documentation rules (`Brief > FAQ > Proposal > engineering-rules.md`); and build the `web/` frontend covering Admin, TA, and Student PA#3 flows with a shared `MockApiClient` / `HttpApiClient` interface preserving FAQ privacy boundaries.
 - **Kept**:
@@ -411,6 +431,7 @@ Team Members:
 ---
 
 ## 2026-11-27 — Audit and harden PostgreSQL schema, migrations, worker outbox, and Docker packaging (`feat/database-hardening`) (Phạm An Ninh)
+
 - **Tool**: Antigravity.
 - **Asked for**: Review the database design and configuration on `origin/feat/auth_and_labs` against project docs/rules (`AGENTS.md`, `docs/engineering-rules.md`, `PA3_rubric.md`, `FAQ.md`, `docs/contract/checker-output.md`), document findings and a remediation plan in `docs/database-plan.md`, and implement the approved fixes on a new branch.
 - **Kept**:
@@ -429,6 +450,7 @@ Team Members:
 ---
 
 ## 2026-11-28 — Implement Student Results, TA Review Queue, and Publish Gate API (Task D2) (Nguyễn Nhật Duy)
+
 - **Tool**: Antigravity.
 - **Asked for**: Write the Task D2 API contract (`docs/contract/reviews-and-results.md`) first, then implement D2.1–D2.3 Gateway endpoints (student-safe submission results enforcing Syllabus Rule before/after Publish, TA review queue with 100% violation/unsure + `ceil(10%)` pass sampling on counted AC submissions, single-submission TA inspection, TA review decision with mandatory evidence on violation, and Publish gate rejecting before deadline or while `PENDING_REVIEW` items remain) and contract tests on branch `feat/review_and_results`.
 - **Kept**:
@@ -456,7 +478,9 @@ Team Members:
 - **Changed**: Added the feature spec outline, the five areas to check during spec review, and the mapping from numbered acceptance criteria to tests. Used submission idempotency as a LeeTKOB example and checked it against the contract and the existing concurrency test.
 - **Rejected**: Copying the restaurant example's endpoint and error format into LeeTKOB. Its API behavior is specific to the classroom example.
 - **Validation**: Verified the eight spec sections, both Markdown links, and a clean `git diff --check`. Application tests were skipped for this documentation edit.
+
 ## 2026-11-28 — Sync PostgreSQL 16 migrations and Gateway persistence with `checker/`, FAQ, and Proposal (Phạm An Ninh)
+
 - **Tool**: Antigravity.
 - **Asked for**: Audit `gateway/migrations/0001_init_pa3_schema.{up,down}.sql` and `gateway/src/persistence/` against the merged `checker/` implementation (`models.py`, `hard_rules.py`, `sanitizer.py`, `guardrails.py`, `llm_client.py`, `semantic_checker.py`), `docs/contract/checker-output.md`, `docs/proposal/FAQ.md` (`FAQ-01`..`FAQ-14`), and `docs/proposal/proposal-detail.md` (§2, §4.2), document discrepancies in `docs/database-checker-sync-plan.md`, and apply the approved Option 1 consolidation directly into `0001_init_pa3_schema`.
 - **Kept**:
@@ -478,6 +502,7 @@ Team Members:
 ---
 
 ## 2026-11-28 — Implement Task N1: Durable PostgreSQL Queue, Standalone Judge Worker & Internal Checker HTTP Bridge (Phạm An Ninh)
+
 - **Tool**: Antigravity.
 - **Asked for**: Implement Task N1 (`pa3-team-tasks.md`) on branch `feat/judge-queue-worker`: agree and document the internal job/result contract, build a standalone `judge/` worker consuming the PostgreSQL durable queue (`submission_jobs` via `FOR UPDATE SKIP LOCKED` + `LISTEN/NOTIFY` + stale-lease recovery), store overall and per-test verdicts, trigger the isolated internal `checker` service for `AC` submissions only, guarantee single-verdict/finding idempotency on redelivery, and provide stop → submit → restart verification tests and script.
 - **Kept**:
@@ -503,6 +528,7 @@ Team Members:
 ---
 
 ## 2026-11-28 — Implement Task N2: Hardened C++17 Docker Sandbox (9 Minimums), Attack Suite & `pa3` Tag CI (Phạm An Ninh)
+
 - **Tool**: Antigravity.
 - **Asked for**: Implement Task N2 (`pa3-team-tasks.md`) on branch `feat/n2-cpp-sandbox-ci`: compile and execute untrusted C++17 code inside isolated Docker containers enforcing all 9 PA#3 Criterion 2 minimums, add all 9 rubric attack `.cpp` submissions with expected assertions, configure `.github/workflows/ci.yml` to run the Docker sandbox suite on `pull_request`, `main`, and tag `pa3` with a 9-row CI summary table while keeping the 4 README quality gate commands 100% offline, and isolate Docker daemon access for `judge-worker` via `docker-socket-proxy`.
 - **Kept**:
@@ -520,6 +546,7 @@ Team Members:
 - **Validation**:
   - Offline canonical gates: `npm run lint` (0 errors/warnings across all 4 services), `npm run format:check` (all clean), `npm run typecheck` (3 TS workspaces + `mypy --strict` 15 Python files), `npm run test` (Gateway 82 Jest + Web 8 Vitest + Judge 19 Jest + Checker 30 Pytest = **139 passed**), `npm run build --workspace=judge`, `npm run build --workspace=gateway`, and red-flag grep scan (0 matches).
   - Real Docker verification (`npm run sandbox:build --workspace=judge` & `npm run test:sandbox --workspace=judge` on local Docker Desktop): `00_sanity_ac.cpp` -> `AC`, and **9/9 rubric attack rows PASSED** (`1=RE/0 canary hits`, `2=TLE via RLIMIT_CPU`, `3=TLE/0 lingering containers`, `4=MLE via OOMKilled`, `5=RE/0 lingering`, `6=RE`, `7=RE`, `8=RE`, `9a=RE & 9b=CE/0 canary leaks`).
+
 ## 2026-11-28 — Add a skill for writing API contracts and contract tests
 
 - **Tool**: Codex.
@@ -532,6 +559,7 @@ Team Members:
 ---
 
 ## 2026-11-28 — Complete Task D1: Sync Web HTTP Client with Gateway Auth, Classes, Labs & Trackable Submissions (Phạm An Ninh)
+
 - **Tool**: Antigravity.
 - **Asked for**: Audit Task D1 (`pa3-team-tasks.md`) against current code/docs and complete the remaining ~30% so `web/` (`VITE_API_MODE=http`) works end-to-end against `gateway/` (on top of PR #22 `feat/review_and_results`), including demo login by `username` or `email`, `GET /auth/me`, `GET/POST /classes`, `GET/POST /classes/:classId/labs`, `GET /submissions/:submissionId`, CORS headers, official `sort-merge` acceptance test, and contract updates per `write-api-contract`.
 - **Kept**:
@@ -548,3 +576,24 @@ Team Members:
   - Changing mock seed passwords in `web/src/api/mock-seed.ts` (would break existing UI test `web/src/App.spec.tsx`); kept mock seed intact while using real `scrypt` demo credentials for HTTP mode.
 - **Validation**:
   - Ran all four canonical root quality gates plus builds and Gateway e2e offline: `npm run lint` (Gateway, Web, Judge ESLint + Checker Ruff — 0 errors/warnings), `npm run format:check` (all 4 services clean), `npm run typecheck` (Gateway, Web, Judge `tsc --noEmit` + Checker `mypy --strict` 15 files clean), `npm run test` (Gateway Jest 9 suites / **88 tests**, Web Vitest 2 suites / **9 tests**, Judge Jest 4 suites / **19 tests**, Checker Pytest **30 tests** = **146 passed**), `npm run build --workspace=gateway`, `npm run build --workspace=web`, and `npm run test:e2e --workspace=gateway` (1/1 passed).
+
+---
+
+## 2026-11-28 — Complete Task D2: PostgreSQL Publish Gate Fix, FAQ-10 Random Sampling, Audit Logs & Web TA Review / Student Published UI (Phạm An Ninh)
+- **Tool**: Antigravity.
+- **Asked for**: Audit Task D2 (`pa3-team-tasks.md`) against `main` (`e507d51`), `PA3_rubric.md`, `FAQ-02/03/04/08/09/10/11/12`, `checker-output.md`, and `.agents/skills/write-api-contract/SKILL.md`, and complete the remaining ~25% gaps across Contract, Gateway, PostgreSQL persistence, Judge worker, and Web UI.
+- **Kept**:
+  - Upgraded [docs/contract/reviews-and-results.md](docs/contract/reviews-and-results.md) to the 5-section IA#3 outline (`Conventions`, `Errors`, `Resources`, `Endpoints`, `Versions`) documenting `GET /submissions/{submissionId}`, full `POST /labs/{labId}/publish` refusal gates (`FAQ-03`/`FAQ-12`), post-publish TA modification `reason` rule, and additive UI metadata while preserving 100% backward compatibility.
+  - Fixed a PostgreSQL publish-gate bug in `gateway/src/persistence/postgres.store.ts` (`publishLabAtomic`) and aligned `gateway/src/submissions/submissions.store.ts` so Publish rejects (`409 Conflict` + `ROLLBACK`) whenever any counted submission is unjudged (`pipeline_status <> 'COMPLETED'`) or any counted `AC` submission has `checker_status <> 'COMPLETED'`.
+  - Updated `rebalanceLabPassSample` in `gateway/src/persistence/postgres.store.ts`, `gateway/src/submissions/submissions.store.ts`, and `judge/src/queue/job-store.ts` to select the `ceil(10%)` `pass` sample randomly (`ORDER BY RANDOM()` / cryptographic Fisher-Yates `randomInt` per `FAQ-10`).
+  - Added `before_state` + `after_state` audit logging on TA finding reviews (`PostgresPersistence.reviewConstraintFinding` with `FOR UPDATE` + in-memory `SubmissionStore.auditLogs`), enforced non-empty `reason` when editing findings after Publish (`FAQ-12`), honored `manualScore` (`FAQ-04`), and added additive metadata (`studentName`, `labTitle`, `publishedAt`, `maxTimeMs`, `maxMemoryKb`, `submissionCount`, `pendingReviewCount`).
+  - Completed `web/` interactive D2 experience in both `HttpApiClient` and `MockApiClient`: expanded `UnsureReason` to all 7 official `checker-output.md`/`FAQ-09` codes, added `listLabSubmissions`, `reviewFinding` (`PATCH`), and `publishLab` (`POST`), built per-finding TA decision/deduction/evidence form, direct submission lookup bar for live demo, and Publish action in `web/src/pages/ta/TaReviewQueuePage.tsx` (strictly keeping no "Approve All" button), and added post-publish official score & confirmed deductions display in `web/src/pages/student/StudentLabSolvePage.tsx`.
+  - Added `AC2`–`AC7` tests across `gateway/test/reviews-and-results.contract.spec.ts`, `gateway/test/database-hardening.spec.ts`, `web/src/api/http-client.spec.ts`, and `web/src/App.spec.tsx`.
+- **Changed**:
+  - Kept `TaReviewQueuePage.tsx` initial UI dropdown default at `scope = 'all'` (while the API default remains `scope = 'counted'` with a 1-click toggle) after verifying `web/src/App.spec.tsx` asserts 3 demo submissions on initial render and PA#3 Criterion 1's demo submits 3 solutions from one student to the same lab.
+  - Preserved legacy mock `UnsureReason` aliases alongside the 7 official `FAQ-09` codes in `web/src/types/review.ts` so existing offline UI specs remain green while HTTP mode renders exact backend codes without lossy mapping.
+- **Rejected**:
+  - Adding `code` to `GET /labs/:labId/submissions/:submissionId` to fix the empty student source modal in HTTP mode (would violate existing contract assertion `expect(res.body.code).toBeUndefined()` in `reviews-and-results.contract.spec.ts`); hid the modal button when `activeSub.code` is empty instead.
+  - Adding any bulk "Approve All" button for LLM flags on `TaReviewQueuePage.tsx` (forbidden by PA#3 Syllabus Rule).
+- **Validation**:
+  - Ran all four canonical root quality gates plus all 3 TS workspace builds and Gateway e2e offline: `npm run lint` (0 errors/warnings across all 4 services), `npm run format:check` (all 4 services clean), `npm run typecheck` (Gateway, Web, Judge `tsc --noEmit` + Checker `mypy --strict` 15 files clean), `npm run test` (Gateway Jest 9 suites / **92 tests**, Web Vitest 2 suites / **11 tests**, Judge Jest 4 suites / **19 tests**, Checker Pytest **30 tests** = **152 passed**), `npm run build --workspace=gateway`, `npm run build --workspace=web`, `npm run build --workspace=judge`, and `npm run test:e2e --workspace=gateway` (1/1 passed).
