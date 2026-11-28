@@ -425,3 +425,23 @@ Team Members:
   - Keeping auto-DDL or weak demo password seeding inside `onModuleInit()` (violates Session 04/08 separate migrations and production security hygiene).
   - Storing lab deductions/scores as floating-point columns or keeping hidden test cases embedded in a `labs.test_cases` JSONB blob.
 - **Validation**: Ran `npm run lint`, `npm run format:check`, `npm run typecheck`, `npm run test` (all Gateway Jest suites including new `database-hardening.spec.ts`, Web Vitest, and Checker Pytest), and `npm run build --workspace=gateway` offline on branch `feat/database-hardening`.
+
+---
+
+## 2026-11-28 — Implement Student Results, TA Review Queue, and Publish Gate API (Task D2) (Nguyễn Nhật Duy)
+- **Tool**: Antigravity.
+- **Asked for**: Write the Task D2 API contract (`docs/contract/reviews-and-results.md`) first, then implement D2.1–D2.3 Gateway endpoints (student-safe submission results enforcing Syllabus Rule before/after Publish, TA review queue with 100% violation/unsure + `ceil(10%)` pass sampling on counted AC submissions, single-submission TA inspection, TA review decision with mandatory evidence on violation, and Publish gate rejecting before deadline or while `PENDING_REVIEW` items remain) and contract tests on branch `feat/review_and_results`.
+- **Kept**:
+  - `docs/contract/reviews-and-results.md`: Contract-first specification aligned with RFC 9457, `docs/contract/checker-output.md`, and `FAQ-02`, `FAQ-04`, `FAQ-08`, `FAQ-09`, `FAQ-10`, `FAQ-11`, `FAQ-12`.
+  - `gateway/src/persistence/postgres.store.ts` & `gateway/src/submissions/submissions.store.ts`: Added `listLabSubmissions` / `listLabSubmissionsAsync`, `getSubmissionFindingsAsync`, and `publishLabAtomicAsync` (dual-mode PostgreSQL + in-memory).
+  - `gateway/src/submissions/submissions.service.ts` & `submissions.controller.ts`: Implemented six D2 endpoints (`GET /labs/:labId/submissions`, `GET /labs/:labId/submissions/:submissionId`, `GET /labs/:labId/review-queue`, `GET /labs/:labId/submissions/:submissionId/review`, `PATCH /labs/:labId/submissions/:submissionId/findings/:findingId`, `POST /labs/:labId/publish`) with class-ownership checks and Syllabus Rule DTO sanitization.
+  - `gateway/test/reviews-and-results.contract.spec.ts`: Contract tests covering pre-Publish redaction, IDOR `403`, cross-class TA `403`, `ceil(10%)` pass sampling, `400` on `VIOLATION` without evidence, `409` on early/unreviewed Publish, idempotent Publish, and post-Publish `finalScore` calculation.
+- **Changed**:
+  - Kept `PostgresPersistence.publishLabAtomic` SQL query order intact so existing `database-hardening.spec.ts` mock-pool assertions continue to pass without touching existing tests, while adding in-memory parity in `SubmissionStore.publishLabAtomicAsync`.
+  - Explicitly gated `proposedDeduction` in TA review queue responses to `configuredDeduction` only when `verdict === 'violation'` (and `0` for `unsure`/`pass`) per `FAQ-11`.
+- **Rejected**:
+  - Rejected exposing raw checker `findings`, `evidence`, `unsureReason`, `DISMISSED_PASS`, or `isSampledPass` to student responses (enforcing PA#3 Syllabus Rule and `FAQ-08`).
+  - Rejected weakening or modifying any existing PA#2/PA#3 contract tests (`submissions.contract.spec.ts`, `database-hardening.spec.ts`).
+  - Deferred `web/` UI changes so frontend work stays separate from backend API commits.
+- **Validation**:
+  - Ran `npm run lint`, `npm run format:check`, `npm run typecheck`, and `npm run test` across `gateway` and `web`: all passed (`gateway` Jest 8/8 suites, 85/85 tests; `web` Vitest 1/1 file, 1/1 test; ESLint, Prettier, `tsc --noEmit` clean).
