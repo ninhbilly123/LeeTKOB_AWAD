@@ -1,6 +1,28 @@
 # LeeTKOB Engineering Rules (CSC13114 Course Standards)
 
-This document consolidates the mandatory web engineering rules from CSC13114 Sessions 03–08 (The Harness, Data, API Contracts, Security, Quality Gates, and Packaging & Release). Every team member and AI assistant must follow these rules when designing, coding, testing, and deploying LeeTKOB.
+This document consolidates the web engineering rules from CSC13114 Sessions 02–08 (Specifications for Agents, The Harness, Data, API Contracts, Security, Quality Gates, and Packaging & Release). Every team member and AI assistant must follow these rules when designing, coding, testing, and deploying LeeTKOB.
+
+---
+
+## 0. Feature Specifications (Session 02)
+
+Source: CSC13114, *Specifications for Agents* (24 September 2026).
+
+- Before implementation, turn the user story into a short spec that a teammate or assistant can implement from the document. Record the owner and status. Have a teammate read it, write down the questions they would need answered to implement it, and resolve those questions in the spec before coding.
+
+| Spec section | What to record |
+| --- | --- |
+| Goal | The user outcome in one sentence. |
+| Out of scope | Specific behavior or work this feature excludes. |
+| Flow | The normal sequence of user and system actions. |
+| Contract | The endpoints, payloads, status codes, or internal events the feature uses. Link to the detailed [endpoint contract](#3-api-contracts-session-05) where applicable. |
+| Data | The tables or fields that change and the invariants that must hold. |
+| Errors | What triggers each failure, what the caller sees, and what the system persists, rolls back, or retries. |
+| Acceptance | Numbered criteria (`AC1`, `AC2`, …) with a concrete setup, action, and observable result. |
+| Constraints | Applicable dependencies, schema or compatibility restrictions, budget, and deadline. |
+
+- During spec review, check empty and first-run states, partial failure, roles and resource ownership, simultaneous or duplicate requests, and behavior at limits.
+- Use each acceptance criterion's ID in its corresponding test name. Include observable state changes or invariants where they matter. For example, two concurrent submissions by the same student with the same valid `Idempotency-Key` and payload both return `201` with the same submission ID, and only one submission is stored. See the [submission contract](contract/post-submissions.md#6-idempotency-specification).
 
 ---
 

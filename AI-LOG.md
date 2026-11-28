@@ -425,3 +425,14 @@ Team Members:
   - Keeping auto-DDL or weak demo password seeding inside `onModuleInit()` (violates Session 04/08 separate migrations and production security hygiene).
   - Storing lab deductions/scores as floating-point columns or keeping hidden test cases embedded in a `labs.test_cases` JSONB blob.
 - **Validation**: Ran `npm run lint`, `npm run format:check`, `npm run typecheck`, `npm run test` (all Gateway Jest suites including new `database-hardening.spec.ts`, Web Vitest, and Checker Pytest), and `npm run build --workspace=gateway` offline on branch `feat/database-hardening`.
+
+---
+
+## 2026-11-28 — Add feature specification guidance from CSC13114 Session 02
+
+- **Tool**: Codex.
+- **Asked for**: Compare the Specifications for Agents lecture with `docs/engineering-rules.md` and add the guidance the document was missing.
+- **Kept**: The Session 05 endpoint-contract rules and the existing submission API contract.
+- **Changed**: Added the feature spec outline, the five areas to check during spec review, and the mapping from numbered acceptance criteria to tests. Used submission idempotency as a LeeTKOB example and checked it against the contract and the existing concurrency test.
+- **Rejected**: Copying the restaurant example's endpoint and error format into LeeTKOB. Its API behavior is specific to the classroom example.
+- **Validation**: Verified the eight spec sections, both Markdown links, and a clean `git diff --check`. Application tests were skipped for this documentation edit.
