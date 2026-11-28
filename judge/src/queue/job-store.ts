@@ -214,11 +214,7 @@ export class PostgresJobStore implements WorkerJobStore {
     }
   }
 
-  private async rebalanceLabPassSample(
-    client: PgClientLike,
-    labId: string,
-    preferSubmissionId: string | null = null,
-  ): Promise<void> {
+  private async rebalanceLabPassSample(client: PgClientLike, labId: string): Promise<void> {
     await client.query(
       `WITH pass_stats AS (
          SELECT
@@ -244,14 +240,14 @@ export class PostgresJobStore implements WorkerJobStore {
            AND s.overall_verdict = 'AC'
            AND cf.verdict = 'pass'
            AND cf.is_sampled_pass = FALSE
-         ORDER BY ($2::text IS NOT NULL AND cf.submission_id = $2) DESC, cf.id ASC
+         ORDER BY RANDOM()
          LIMIT (SELECT deficit FROM needed)
        )
        UPDATE constraint_findings
        SET is_sampled_pass = TRUE,
            review_status = CASE WHEN review_status = 'NOT_QUEUED' THEN 'PENDING_REVIEW' ELSE review_status END
        WHERE id IN (SELECT id FROM candidates)`,
-      [labId, preferSubmissionId],
+      [labId],
     );
   }
 
@@ -323,7 +319,7 @@ export class PostgresJobStore implements WorkerJobStore {
         );
         const labId = subRes.rows[0]?.lab_id ? String(subRes.rows[0].lab_id) : null;
         if (labId) {
-          await this.rebalanceLabPassSample(client, labId, null);
+          await this.rebalanceLabPassSample(client, labId);
         }
       }
 
@@ -433,7 +429,7 @@ export class PostgresJobStore implements WorkerJobStore {
         );
       }
 
-      await this.rebalanceLabPassSample(client, input.labId, input.submissionId);
+      await this.rebalanceLabPassSample(client, input.labId);
 
       await client.query(
         `UPDATE submissions

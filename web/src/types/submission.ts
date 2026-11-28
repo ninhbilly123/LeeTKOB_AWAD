@@ -48,6 +48,7 @@ export interface PublishedDeductionItem {
   description: string;
   deduction: number;
   evidenceLines: number[];
+  evidence?: Array<{ line: number; text: string }>;
   taNote?: string;
 }
 

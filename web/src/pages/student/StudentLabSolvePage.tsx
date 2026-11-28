@@ -625,20 +625,123 @@ export function StudentLabSolvePage({ labId }: StudentLabSolvePageProps) {
                       <code>FAQ-02</code>).
                     </p>
 
-                    {!activeSub.publishedGrade && (
+                    {!activeSub.publishedGrade ? (
                       <div className="notice-box" style={{ marginBottom: '0.75rem' }}>
                         Kết quả soát ràng buộc kỹ thuật và điểm chính thức sẽ chỉ hiển thị sau khi
                         Trợ giảng xem xét và công bố bảng điểm (<code>FAQ-08</code>).
                       </div>
+                    ) : (
+                      <div
+                        style={{
+                          marginBottom: '0.75rem',
+                          padding: '0.85rem 1rem',
+                          borderRadius: 'var(--radius-sm)',
+                          border: '1px solid var(--border-subtle)',
+                          background: 'var(--bg-subtle)',
+                          display: 'grid',
+                          gap: '0.5rem',
+                        }}
+                        aria-label="Kết quả điểm chính thức sau công bố"
+                      >
+                        <div
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            flexWrap: 'wrap',
+                          }}
+                        >
+                          <strong>Điểm chính thức (Đã công bố — FAQ-08, FAQ-11)</strong>
+                          <span
+                            className="mono"
+                            style={{
+                              fontSize: '1.05rem',
+                              fontWeight: 700,
+                              color: 'var(--brand-600)',
+                            }}
+                          >
+                            {activeSub.publishedGrade.finalScore} / 10 điểm
+                          </span>
+                        </div>
+                        <div className="field-hint mono">
+                          Điểm gốc: {activeSub.publishedGrade.rawScore} • Tổng trừ: -
+                          {activeSub.publishedGrade.totalDeductions} • Công bố lúc:{' '}
+                          {formatDateTimeVi(activeSub.publishedGrade.publishedAt)}
+                        </div>
+                        {activeSub.publishedGrade.confirmedDeductions.length === 0 ? (
+                          <div style={{ fontSize: '0.88rem' }}>
+                            Không có khoản trừ ràng buộc nào được áp dụng cho bài nộp này.
+                          </div>
+                        ) : (
+                          <ul
+                            style={{
+                              listStyle: 'none',
+                              padding: 0,
+                              margin: 0,
+                              display: 'grid',
+                              gap: '0.5rem',
+                            }}
+                          >
+                            {activeSub.publishedGrade.confirmedDeductions.map((ded) => (
+                              <li
+                                key={ded.constraintCode}
+                                style={{
+                                  border: '1px solid var(--status-warn-border)',
+                                  background: 'var(--status-warn-bg)',
+                                  color: 'var(--status-warn-text)',
+                                  borderRadius: 'var(--radius-sm)',
+                                  padding: '0.55rem 0.7rem',
+                                  fontSize: '0.86rem',
+                                  display: 'grid',
+                                  gap: '0.25rem',
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    gap: '0.5rem',
+                                    flexWrap: 'wrap',
+                                  }}
+                                >
+                                  <strong className="mono">{ded.constraintCode}</strong>
+                                  <strong className="mono">-{ded.deduction} điểm</strong>
+                                </div>
+                                <div>{ded.description}</div>
+                                {ded.evidence && ded.evidence.length > 0 ? (
+                                  <div className="mono" style={{ fontSize: '0.8rem' }}>
+                                    Bằng chứng:{' '}
+                                    {ded.evidence
+                                      .map((ev) => `Dòng ${ev.line}: ${ev.text}`)
+                                      .join(' | ')}
+                                  </div>
+                                ) : ded.evidenceLines.length > 0 ? (
+                                  <div className="mono" style={{ fontSize: '0.8rem' }}>
+                                    Dòng bằng chứng: {ded.evidenceLines.join(', ')}
+                                  </div>
+                                ) : null}
+                                {ded.taNote && (
+                                  <div>
+                                    <strong>Ghi chú TA:</strong> {ded.taNote}
+                                  </div>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
                     )}
 
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={() => codeDialogRef.current?.showModal()}
-                    >
-                      Xem lại mã nguồn đã nộp
-                    </button>
+                    {activeSub.code.trim().length > 0 && (
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={() => codeDialogRef.current?.showModal()}
+                      >
+                        Xem lại mã nguồn đã nộp
+                      </button>
+                    )}
                   </>
                 )}
               </div>

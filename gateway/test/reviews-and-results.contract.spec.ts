@@ -441,4 +441,256 @@ describe('Task D2: Student Results, TA Review Queue & Publish Contract', () => {
     expect(student2After.body.finalScore).toBe(0);
     expect(student2After.body.deductions).toEqual([]);
   });
+
+  it('AC2: blocks cross-class TA and students with 403 across all review & publish endpoints with zero state mutation', async () => {
+    const ta1Token = await login('ta1', 'ta123');
+    const ta2Token = await login('ta2', 'ta123');
+    const student1Token = await login('student1', 'student123');
+
+    const labId = await createSortMergeLab(ta1Token, '2099-12-31T23:59:59.000Z');
+    const subId = await submitCode(labId, student1Token, 'int main() { return 0; }');
+
+    await submissionStore.recordJudgeResultAsync({
+      submissionId: subId,
+      overallVerdict: 'AC',
+      compileOutput: null,
+      testResults: [{ ordinal: 1, verdict: 'AC', timeMs: 10, memoryKb: 2048 }],
+      maxTimeMs: 10,
+      maxMemoryKb: 2048,
+      judgedAt: new Date().toISOString(),
+    });
+    await submissionStore.recordCheckerResultAsync({
+      submissionId: subId,
+      labId,
+      findings: [
+        {
+          constraintCode: 'C1',
+          source: 'HARD_RULE',
+          verdict: 'violation',
+          unsureReason: null,
+          evidence: [{ line: 1, text: 'int main() { return 0; }' }],
+          reason: 'Violation sample.',
+        },
+      ],
+      callLogs: [],
+    });
+
+    const findingsBefore = await submissionStore.getSubmissionFindingsAsync(subId);
+    const findingId = findingsBefore[0].id;
+
+    for (const deniedToken of [ta2Token, student1Token]) {
+      await request(app.getHttpServer())
+        .get(`/labs/${labId}/submissions/${subId}/review`)
+        .set('Authorization', `Bearer ${deniedToken}`)
+        .expect(403);
+
+      await request(app.getHttpServer())
+        .patch(`/labs/${labId}/submissions/${subId}/findings/${findingId}`)
+        .set('Authorization', `Bearer ${deniedToken}`)
+        .set('Content-Type', 'application/json')
+        .send({ decision: 'PASS' })
+        .expect(403);
+
+      await request(app.getHttpServer())
+        .post(`/labs/${labId}/publish`)
+        .set('Authorization', `Bearer ${deniedToken}`)
+        .expect(403);
+    }
+
+    // Zero side effects after refusals (Engineering Rules §5)
+    const findingsAfter = await submissionStore.getSubmissionFindingsAsync(subId);
+    expect(findingsAfter[0].reviewStatus).toBe('PENDING_REVIEW');
+    expect(findingsAfter[0].taDecision).toBeNull();
+    expect(labsStore.getLab(labId)?.isPublished).toBe(false);
+    expect(submissionStore.getAuditLogs()).toHaveLength(0);
+  });
+
+  it('AC3 & AC4: samples ceil(10%) of pass findings randomly, allows TA override of non-queued pass, and logs before/after audit state', async () => {
+    const ta1Token = await login('ta1', 'ta123');
+    const labId = await createSortMergeLab(ta1Token, '2099-12-31T23:59:59.000Z');
+
+    // Seed 11 distinct counted AC submissions (1 pass finding each -> ceil(0.10 * 11) = 2 sampled)
+    const subIds: string[] = [];
+    for (let i = 1; i <= 11; i += 1) {
+      const subId = `sub_sample_${i}`;
+      subIds.push(subId);
+      submissionStore.saveSubmission({
+        id: subId,
+        labId,
+        studentId: `std_batch_${i}`,
+        code: 'int main() { /* merge sort */ return 0; }',
+        status: 'QUEUED',
+        isCounting: true,
+        submittedAt: new Date(Date.now() + i * 1000).toISOString(),
+        idempotencyKey: randomUUID(),
+      });
+      await submissionStore.recordJudgeResultAsync({
+        submissionId: subId,
+        overallVerdict: 'AC',
+        compileOutput: null,
+        testResults: [{ ordinal: 1, verdict: 'AC', timeMs: 8, memoryKb: 2048 }],
+        maxTimeMs: 8,
+        maxMemoryKb: 2048,
+        judgedAt: new Date().toISOString(),
+      });
+      await submissionStore.recordCheckerResultAsync({
+        submissionId: subId,
+        labId,
+        findings: [
+          {
+            constraintCode: 'C1',
+            source: 'HARD_RULE',
+            verdict: 'pass',
+            unsureReason: null,
+            evidence: [],
+            reason: null,
+          },
+        ],
+        callLogs: [],
+      });
+    }
+
+    const queueRes = await request(app.getHttpServer())
+      .get(`/labs/${labId}/review-queue?scope=counted`)
+      .set('Authorization', `Bearer ${ta1Token}`)
+      .expect(200);
+
+    expect(queueRes.body.labTitle).toBe('Sorting Lab — Merge Sort');
+    expect(queueRes.body.items).toHaveLength(2);
+    expect(queueRes.body.pendingReviewCount).toBe(2);
+    expect(
+      queueRes.body.items.every(
+        (item: { verdict: string; isSampledPass: boolean }) =>
+          item.verdict === 'pass' && item.isSampledPass === true,
+      ),
+    ).toBe(true);
+
+    // Find one NOT_QUEUED pass submission and verify TA can inspect & override it to VIOLATION (FAQ-10)
+    const queuedSubIds = new Set(
+      queueRes.body.items.map((item: { submissionId: string }) => item.submissionId),
+    );
+    const unqueuedSubId = subIds.find((id) => !queuedSubIds.has(id))!;
+    const inspectRes = await request(app.getHttpServer())
+      .get(`/labs/${labId}/submissions/${unqueuedSubId}/review`)
+      .set('Authorization', `Bearer ${ta1Token}`)
+      .expect(200);
+    expect(inspectRes.body.findings[0].reviewStatus).toBe('NOT_QUEUED');
+
+    const findingId = inspectRes.body.findings[0].findingId as string;
+    const overrideRes = await request(app.getHttpServer())
+      .patch(`/labs/${labId}/submissions/${unqueuedSubId}/findings/${findingId}`)
+      .set('Authorization', `Bearer ${ta1Token}`)
+      .set('Content-Type', 'application/json')
+      .send({
+        decision: 'VIOLATION',
+        deduction: 2.5,
+        evidence: [{ line: 1, text: 'int main() { /* merge sort */ return 0; }' }],
+        reason: 'Manual audit spotted violation.',
+      })
+      .expect(200);
+    expect(overrideRes.body.reviewStatus).toBe('APPROVED_VIOLATION');
+    expect(overrideRes.body.taDeduction).toBe(2.5);
+
+    const logs = submissionStore.getAuditLogs();
+    expect(logs).toHaveLength(1);
+    expect(logs[0].action).toBe('TA_REVIEW_FINDING');
+    expect(logs[0].beforeState).toMatchObject({ reviewStatus: 'NOT_QUEUED', taDecision: null });
+    expect(logs[0].afterState).toMatchObject({
+      reviewStatus: 'APPROVED_VIOLATION',
+      decision: 'VIOLATION',
+      deduction: 2.5,
+    });
+  });
+
+  it('AC5 & AC6: blocks Publish while counted submissions are unjudged or unchecked, and requires non-empty reason for post-publish edits (FAQ-03, FAQ-12)', async () => {
+    const ta1Token = await login('ta1', 'ta123');
+    const student1Token = await login('student1', 'student123');
+
+    const labId = await createSortMergeLab(ta1Token, '2099-12-31T23:59:59.000Z');
+    const subId = await submitCode(labId, student1Token, 'int main() { return 0; }');
+
+    // Simulate deadline passed while submission is still QUEUED (unjudged)
+    const lab = labsStore.getLab(labId)!;
+    labsStore.saveLab({ ...lab, deadline: '2020-01-01T00:00:00.000Z' });
+
+    const unjudgedPublish = await request(app.getHttpServer())
+      .post(`/labs/${labId}/publish`)
+      .set('Authorization', `Bearer ${ta1Token}`)
+      .expect(409);
+    expect(unjudgedPublish.body.detail).toContain('judging');
+    expect(labsStore.getLab(labId)?.isPublished).toBe(false);
+
+    // Judge finishes as AC, but checker is still PENDING
+    await submissionStore.recordJudgeResultAsync({
+      submissionId: subId,
+      overallVerdict: 'AC',
+      compileOutput: null,
+      testResults: [{ ordinal: 1, verdict: 'AC', timeMs: 10, memoryKb: 2048 }],
+      maxTimeMs: 10,
+      maxMemoryKb: 2048,
+      judgedAt: new Date().toISOString(),
+    });
+    const uncheckedPublish = await request(app.getHttpServer())
+      .post(`/labs/${labId}/publish`)
+      .set('Authorization', `Bearer ${ta1Token}`)
+      .expect(409);
+    expect(uncheckedPublish.body.detail).toContain('constraint checking');
+    expect(labsStore.getLab(labId)?.isPublished).toBe(false);
+
+    // Checker finishes -> TA approves -> Publish succeeds
+    await submissionStore.recordCheckerResultAsync({
+      submissionId: subId,
+      labId,
+      findings: [
+        {
+          constraintCode: 'C1',
+          source: 'HARD_RULE',
+          verdict: 'violation',
+          unsureReason: null,
+          evidence: [{ line: 1, text: 'int main() { return 0; }' }],
+          reason: 'Initial flag.',
+        },
+      ],
+      callLogs: [],
+    });
+    const findingId = (await submissionStore.getSubmissionFindingsAsync(subId))[0].id;
+    await request(app.getHttpServer())
+      .patch(`/labs/${labId}/submissions/${subId}/findings/${findingId}`)
+      .set('Authorization', `Bearer ${ta1Token}`)
+      .set('Content-Type', 'application/json')
+      .send({
+        decision: 'VIOLATION',
+        deduction: 3,
+        evidence: [{ line: 1, text: 'int main() { return 0; }' }],
+      })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post(`/labs/${labId}/publish`)
+      .set('Authorization', `Bearer ${ta1Token}`)
+      .expect(200);
+
+    // Post-publish edit without reason MUST fail with 400 (FAQ-12)
+    await request(app.getHttpServer())
+      .patch(`/labs/${labId}/submissions/${subId}/findings/${findingId}`)
+      .set('Authorization', `Bearer ${ta1Token}`)
+      .set('Content-Type', 'application/json')
+      .send({ decision: 'PASS', reason: '   ' })
+      .expect(400);
+
+    // Post-publish edit WITH non-empty reason succeeds and updates student's score immediately
+    await request(app.getHttpServer())
+      .patch(`/labs/${labId}/submissions/${subId}/findings/${findingId}`)
+      .set('Authorization', `Bearer ${ta1Token}`)
+      .set('Content-Type', 'application/json')
+      .send({ decision: 'PASS', reason: 'Accepted student appeal after manual review.' })
+      .expect(200);
+
+    const updatedStudentView = await request(app.getHttpServer())
+      .get(`/labs/${labId}/submissions/${subId}`)
+      .set('Authorization', `Bearer ${student1Token}`)
+      .expect(200);
+    expect(updatedStudentView.body.finalScore).toBe(10);
+    expect(updatedStudentView.body.deductions).toEqual([]);
+  });
 });

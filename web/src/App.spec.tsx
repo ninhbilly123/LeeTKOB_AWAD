@@ -210,4 +210,83 @@ describe('LeeTKOB Frontend PA#3 Flows', () => {
     expect(BANNED_STD_SORT_CPP.split('\n')[9]).toContain('std::sort');
     expect(row10?.getAttribute('data-highlighted')).toBe('true');
   });
+
+  it('AC7: blocks Publish while PENDING_REVIEW remains, lets TA review & lookup submission, then shows official grade & deductions to student', async () => {
+    // Advance mock clock past lab_sort_merge deadline (2027-01-15) to test post-deadline publish gate
+    const client = new MockApiClient({
+      judgeStepDelayMs: 0,
+      nowProvider: () => Date.parse('2027-02-01T00:00:00.000Z'),
+    });
+    const ta1Session = await loginAs(client, 'ta1@leetkob.edu.vn');
+    const stuSession = await loginAs(client, 'student1@leetkob.edu.vn');
+
+    const { unmount } = render(
+      <App
+        apiClient={client}
+        initialPath="/ta/labs/lab_sort_merge/review"
+        initialSession={ta1Session}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Danh sách bài \(3\)/i)).toBeTruthy();
+    });
+
+    // Publish before reviewing counted submission sub_pa3_03 MUST fail with [409]
+    fireEvent.click(screen.getByRole('button', { name: /Công bố điểm \(Publish\)/i }));
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toContain('[409]');
+      expect(screen.getByRole('alert').textContent).toContain('PENDING_REVIEW');
+    });
+
+    // Use direct submission lookup input to open counted submission sub_pa3_03
+    const lookupInput = screen.getByLabelText(/Tra cứu trực tiếp theo Submission ID/i);
+    fireEvent.change(lookupInput, { target: { value: 'sub_pa3_03' } });
+    fireEvent.click(screen.getByRole('button', { name: /Mở bài nộp/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Lưu quyết định C2/i)).toBeTruthy();
+    });
+
+    // TA confirms C2 violation with custom deduction 4, line 4 evidence, and note
+    fireEvent.change(
+      screen.getByLabelText(/Mức trừ \(0–10\)/i, { selector: '#ta-deduction-fnd_sub_pa3_03_C2' }),
+      {
+        target: { value: '4' },
+      },
+    );
+    fireEvent.change(
+      screen.getByLabelText(/Ghi chú \/ Lý do TA/i, { selector: '#ta-reason-fnd_sub_pa3_03_C2' }),
+      {
+        target: { value: 'Bubble sort thay vì Merge Sort' },
+      },
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Lưu quyết định C2/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Mức trừ TA đã đặt:/i)).toBeTruthy();
+      expect(screen.getByText(/-4 điểm \(VIOLATION\)/i)).toBeTruthy();
+    });
+
+    // Now Publish succeeds cleanly
+    fireEvent.click(screen.getByRole('button', { name: /Công bố điểm \(Publish\)/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/Đã công bố điểm chính thức cho Lab/i)).toBeTruthy();
+    });
+    unmount();
+
+    // Student 1 opens lab after Publish and sees official score (6 / 10) + confirmed C2 deduction
+    render(
+      <App
+        apiClient={client}
+        initialPath="/student/labs/lab_sort_merge"
+        initialSession={stuSession}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/6 \/ 10 điểm/i)).toBeTruthy();
+      expect(screen.getByText(/Bubble sort thay vì Merge Sort/i)).toBeTruthy();
+    });
+  });
 });

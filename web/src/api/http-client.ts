@@ -14,9 +14,15 @@ import {
 } from '../types/problem-details';
 import type {
   ConstraintVerdictDetail,
+  FindingReviewStatus,
+  LabSubmissionLookupItem,
+  PublishLabResult,
+  ReviewEvidenceLine,
   ReviewQueueBucket,
   ReviewQueueItem,
   ReviewQueueQuery,
+  TaDecision,
+  TaReviewDecisionInput,
   TaSubmissionReviewView,
   UnsureReason,
 } from '../types/review';
@@ -52,6 +58,8 @@ interface GatewayLabDto {
   maxPayloadSize?: number;
   maxCodeBytes?: number;
   publishedAt?: string | null;
+  submissionCount?: number;
+  pendingReviewCount?: number;
   testCases?: Array<{
     id: string;
     ordinal?: number;
@@ -78,6 +86,7 @@ interface GatewaySubmissionSummaryDto {
   id: string;
   labId: string;
   studentId: string;
+  studentName?: string;
   status: SubmissionPipelineStatus;
   overallVerdict: JudgeVerdict | null;
   passedTests: number;
@@ -106,29 +115,44 @@ interface GatewayStudentSubmissionDto extends GatewaySubmissionSummaryDto {
 }
 
 interface GatewayReviewFindingDto {
-  findingId: string;
+  findingId?: string;
+  id?: string;
   submissionId: string;
-  studentId: string;
-  isCounting: boolean;
-  submittedAt: string;
+  studentId?: string;
+  studentName?: string;
+  isCounting?: boolean;
+  submittedAt?: string;
   constraintId: string;
   constraintCode: string;
-  constraintText: string;
-  configuredDeduction: number;
-  proposedDeduction: number;
+  constraintText?: string;
+  configuredDeduction?: number;
+  proposedDeduction?: number;
   source: 'HARD_RULE' | 'LLM';
   verdict: 'pass' | 'violation' | 'unsure';
   unsureReason: string | null;
   evidence: Array<{ line: number; text: string }>;
   reason: string | null;
+  isSampledPass?: boolean;
+  reviewStatus?: FindingReviewStatus;
+  taDecision?: TaDecision | null;
+  taDeduction?: number | null;
+  taEvidence?: ReviewEvidenceLine[] | null;
+  taReason?: string | null;
+  reviewedBy?: string | null;
+  reviewedAt?: string | null;
 }
 
 interface GatewayTaReviewResponseDto {
+  labTitle?: string;
+  isPublished?: boolean;
+  publishedAt?: string | null;
+  studentName?: string;
   submission: {
     id: string;
     labId: string;
     studentId: string;
     code: string;
+    compileOutput?: string | null;
     status: SubmissionPipelineStatus;
     overallVerdict: JudgeVerdict | null;
     checkerStatus?: 'NOT_APPLICABLE' | 'PENDING' | 'COMPLETED';
@@ -160,21 +184,60 @@ function decodeJwtExpiryIso(token: string): string {
   return new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 }
 
+const KNOWN_UNSURE_REASONS = new Set<UnsureReason>([
+  'MODEL_UNSURE',
+  'SCHEMA_INVALID',
+  'EVIDENCE_MISMATCH',
+  'TIMEOUT',
+  'COST_CAP_EXCEEDED',
+  'MODEL_OFF',
+  'PROVIDER_ERROR',
+  'PARSE_FAILURE',
+  'BUDGET_EXCEEDED',
+  'LOW_CONFIDENCE',
+]);
+
 function mapUnsureReason(raw: string | null): UnsureReason | null {
   if (!raw) return null;
-  switch (raw) {
-    case 'SCHEMA_INVALID':
-    case 'EVIDENCE_MISMATCH':
-    case 'PARSE_FAILURE':
-      return 'PARSE_FAILURE';
-    case 'TIMEOUT':
-      return 'TIMEOUT';
-    case 'COST_CAP_EXCEEDED':
-    case 'BUDGET_EXCEEDED':
-      return 'BUDGET_EXCEEDED';
-    default:
-      return 'LOW_CONFIDENCE';
+  if (KNOWN_UNSURE_REASONS.has(raw as UnsureReason)) {
+    return raw as UnsureReason;
   }
+  return 'MODEL_UNSURE';
+}
+
+function mapGatewayFindingToDetail(f: GatewayReviewFindingDto): ConstraintVerdictDetail {
+  const configured = f.configuredDeduction ?? 0;
+  const proposed =
+    f.proposedDeduction !== undefined
+      ? f.proposedDeduction
+      : f.verdict === 'violation'
+        ? configured
+        : 0;
+  return {
+    findingId: f.findingId ?? f.id,
+    constraintId: f.constraintId,
+    code: f.constraintCode,
+    description: f.constraintText ?? f.constraintCode,
+    source: f.source,
+    verdict: f.verdict,
+    unsureReason: mapUnsureReason(f.unsureReason),
+    taConfiguredDeduction: configured,
+    proposedDeduction: proposed,
+    rationale: f.reason ?? '',
+    evidence: (f.evidence ?? []).map((e) => ({
+      lineStart: e.line,
+      lineEnd: e.line,
+      snippet: e.text,
+    })),
+    isSampledPass: f.isSampledPass,
+    reviewStatus: f.reviewStatus,
+    taDecision: f.taDecision ?? null,
+    taDeduction: f.taDeduction ?? null,
+    taEvidence: f.taEvidence ?? null,
+    taReason: f.taReason ?? null,
+    reviewedBy: f.reviewedBy ?? null,
+    reviewedAt: f.reviewedAt ?? null,
+  };
 }
 
 function deriveQueueBucket(findings: GatewayReviewFindingDto[]): ReviewQueueBucket {
@@ -402,8 +465,8 @@ export class HttpApiClient implements LeeTkobApiClient {
         openedAt: lab.openedAt ?? lab.deadline,
         deadline: lab.deadline,
         publishedAt: lab.publishedAt ?? null,
-        submissionCount: 0,
-        pendingReviewCount: 0,
+        submissionCount: lab.submissionCount ?? 0,
+        pendingReviewCount: lab.pendingReviewCount ?? 0,
       })),
       nextCursor: page.nextCursor,
     };
@@ -515,6 +578,7 @@ export class HttpApiClient implements LeeTkobApiClient {
               description: d.constraintText,
               deduction: d.deduction,
               evidenceLines: d.evidence.map((e) => e.line),
+              evidence: d.evidence.map((e) => ({ line: e.line, text: e.text })),
               taNote: d.reason ?? undefined,
             })),
           }
@@ -543,6 +607,35 @@ export class HttpApiClient implements LeeTkobApiClient {
     };
   }
 
+  async listLabSubmissions(
+    token: string,
+    labId: string,
+  ): Promise<{ labId: string; isPublished: boolean; submissions: LabSubmissionLookupItem[] }> {
+    const res = await this.request<{
+      labId: string;
+      isPublished: boolean;
+      submissions?: GatewaySubmissionSummaryDto[];
+    }>(`/labs/${encodeURIComponent(labId)}/submissions`, { token });
+    return {
+      labId: res.labId ?? labId,
+      isPublished: Boolean(res.isPublished),
+      submissions: (res.submissions ?? []).map((s) => ({
+        id: s.id,
+        labId: s.labId,
+        studentId: s.studentId,
+        studentName: s.studentName ?? s.studentId,
+        status: s.status,
+        overallVerdict: s.overallVerdict ?? null,
+        passedTests: s.passedTests ?? 0,
+        totalTests: s.totalTests ?? 0,
+        maxTimeMs: s.maxTimeMs ?? null,
+        maxMemoryKb: s.maxMemoryKb ?? null,
+        isCountedForGrade: Boolean(s.isCountedForGrade ?? s.isCounting),
+        submittedAt: s.submittedAt,
+      })),
+    };
+  }
+
   async listReviewQueue(
     token: string,
     labId: string,
@@ -568,13 +661,14 @@ export class HttpApiClient implements LeeTkobApiClient {
       const bucket = deriveQueueBucket(findings);
       const violationCount = findings.filter((f) => f.verdict === 'violation').length;
       const unsureCount = findings.filter((f) => f.verdict === 'unsure').length;
+      const pendingReviewCount = findings.filter((f) => f.reviewStatus === 'PENDING_REVIEW').length;
       return {
         submissionId,
         labId,
-        studentId: first.studentId,
-        studentName: first.studentId,
-        submittedAt: first.submittedAt,
-        isCountedForGrade: first.isCounting,
+        studentId: first.studentId ?? '',
+        studentName: first.studentName ?? first.studentId ?? submissionId,
+        submittedAt: first.submittedAt ?? '',
+        isCountedForGrade: Boolean(first.isCounting),
         overallVerdict: 'AC',
         checkerStatus: 'COMPLETED',
         queueBucket: bucket,
@@ -586,6 +680,7 @@ export class HttpApiClient implements LeeTkobApiClient {
               : 'Mẫu 10% pass',
         violationCount,
         unsureCount,
+        pendingReviewCount,
         maxTimeMs: null,
         maxMemoryKb: null,
       };
@@ -607,46 +702,62 @@ export class HttpApiClient implements LeeTkobApiClient {
       `/submissions/${encodeURIComponent(submissionId)}`,
       { token },
     );
-    const findings: ConstraintVerdictDetail[] = (dto.findings ?? []).map((f) => ({
-      constraintId: f.constraintId,
-      code: f.constraintCode,
-      description: f.constraintText,
-      source: f.source,
-      verdict: f.verdict,
-      unsureReason: mapUnsureReason(f.unsureReason),
-      taConfiguredDeduction: f.configuredDeduction,
-      proposedDeduction: f.proposedDeduction,
-      rationale: f.reason ?? '',
-      evidence: (f.evidence ?? []).map((e) => ({
-        lineStart: e.line,
-        lineEnd: e.line,
-        snippet: e.text,
-      })),
-    }));
+    const findings: ConstraintVerdictDetail[] = (dto.findings ?? []).map(mapGatewayFindingToDetail);
 
     return {
       submissionId: dto.submission.id,
       labId: dto.submission.labId,
-      labTitle: dto.submission.labId,
-      publishedAt: null,
+      labTitle: dto.labTitle ?? dto.submission.labId,
+      publishedAt: dto.publishedAt ?? null,
       studentId: dto.submission.studentId,
-      studentName: dto.submission.studentId,
+      studentName: dto.studentName ?? dto.submission.studentId,
       submittedAt: dto.submission.submittedAt,
       isCountedForGrade: Boolean(dto.submission.isCounting),
-      overallVerdict: dto.submission.overallVerdict ?? 'AC',
+      overallVerdict: dto.submission.overallVerdict ?? null,
       passedTests: dto.submission.passedTests ?? 0,
       totalTests: dto.submission.totalTests ?? 0,
       maxTimeMs: dto.submission.maxTimeMs ?? null,
       maxMemoryKb: dto.submission.maxMemoryKb ?? null,
       code: dto.submission.code,
+      compileOutput: dto.submission.compileOutput ?? null,
       testVerdicts: (dto.testVerdicts ?? []).map((t) => ({
         ordinal: t.ordinal,
         verdict: t.verdict,
         timeMs: t.timeMs ?? undefined,
       })),
-      checkerStatus: dto.submission.checkerStatus === 'COMPLETED' ? 'COMPLETED' : 'PENDING',
+      checkerStatus:
+        dto.submission.checkerStatus === 'COMPLETED'
+          ? 'COMPLETED'
+          : dto.submission.checkerStatus === 'NOT_APPLICABLE'
+            ? 'NOT_APPLICABLE'
+            : 'PENDING',
       queueBucket: deriveQueueBucket(dto.findings ?? []),
       constraintVerdicts: findings,
     };
+  }
+
+  async reviewFinding(
+    token: string,
+    labId: string,
+    submissionId: string,
+    findingId: string,
+    input: TaReviewDecisionInput,
+  ): Promise<ConstraintVerdictDetail> {
+    const updated = await this.request<GatewayReviewFindingDto>(
+      `/labs/${encodeURIComponent(labId)}/submissions/${encodeURIComponent(submissionId)}/findings/${encodeURIComponent(findingId)}`,
+      {
+        method: 'PATCH',
+        token,
+        body: input,
+      },
+    );
+    return mapGatewayFindingToDetail(updated);
+  }
+
+  publishLab(token: string, labId: string): Promise<PublishLabResult> {
+    return this.request<PublishLabResult>(`/labs/${encodeURIComponent(labId)}/publish`, {
+      method: 'POST',
+      token,
+    });
   }
 }
