@@ -1,13 +1,13 @@
 # API Contract: Student Results, TA Review Queue & Grade Publishing (Task D2)
 
-- **Endpoints:**
-  - `GET /labs/{labId}/submissions` — List submissions in a lab (role-scoped summary).
-  - `GET /labs/{labId}/submissions/{submissionId}` — Student-safe submission result (Syllabus Rule sanitized).
-  - `GET /submissions/{submissionId}` — Direct role-dispatched submission lookup (`STUDENT` → sanitized result; `TA`/`ADMIN` → full review view).
-  - `GET /labs/{labId}/review-queue` — TA constraint review queue (`scope=counted` default | `scope=all`).
-  - `GET /labs/{labId}/submissions/{submissionId}/review` — TA single-submission inspection (full C++ source, test verdicts, all findings).
-  - `PATCH /labs/{labId}/submissions/{submissionId}/findings/{findingId}` — TA review decision (`PASS` / `VIOLATION`) with evidence and audit logging.
-  - `POST /labs/{labId}/publish` — Atomic, idempotent lab grade publishing gated by deadline, judge/checker completion, and zero pending reviews.
+- **Endpoints (Baseline & `/v1` Alias):**
+  - `GET /labs/{labId}/submissions` (`GET /v1/labs/{labId}/submissions`) — Keyset cursor-paginated list of submissions in a lab (role-scoped summary).
+  - `GET /labs/{labId}/submissions/{submissionId}` (`GET /v1/labs/{labId}/submissions/{submissionId}`) — Student-safe submission result (Syllabus Rule sanitized).
+  - `GET /submissions/{submissionId}` (`GET /v1/submissions/{submissionId}`) — Direct role-dispatched submission lookup (`STUDENT` → sanitized result; `TA`/`ADMIN` → full review view).
+  - `GET /labs/{labId}/review-queue` (`GET /v1/labs/{labId}/review-queue`) — Keyset cursor-paginated TA constraint review queue (`scope=counted` default | `scope=all`).
+  - `GET /labs/{labId}/submissions/{submissionId}/review` (`GET /v1/labs/{labId}/submissions/{submissionId}/review`) — TA single-submission inspection (full C++ source, test verdicts, all findings).
+  - `PATCH /labs/{labId}/submissions/{submissionId}/findings/{findingId}` (`PATCH /v1/labs/{labId}/submissions/{submissionId}/findings/{findingId}`) — TA review decision (`PASS` / `VIOLATION`) with evidence and audit logging.
+  - `POST /labs/{labId}/publish` (`POST /v1/labs/{labId}/publish`) — Atomic, state-idempotent lab grade publishing gated by deadline, judge/checker completion, and zero pending reviews.
 - **Referenced FAQs & Contracts:** [FAQ-01](../proposal/FAQ.md#faq-01), [FAQ-02](../proposal/FAQ.md#faq-02), [FAQ-03](../proposal/FAQ.md#faq-03), [FAQ-04](../proposal/FAQ.md#faq-04), [FAQ-08](../proposal/FAQ.md#faq-08), [FAQ-09](../proposal/FAQ.md#faq-09), [FAQ-10](../proposal/FAQ.md#faq-10), [FAQ-11](../proposal/FAQ.md#faq-11), [FAQ-12](../proposal/FAQ.md#faq-12), [checker-output.md](checker-output.md), [post-submissions.md](post-submissions.md), PA#3 Syllabus Rule.
 
 ---
@@ -15,9 +15,11 @@
 ## 1. Conventions
 
 ### 1.1 Media Types, Identifiers, Time & Units
-- **Request `Content-Type`:** `application/json` is mandatory on `PATCH` writes (returns `415 Unsupported Media Type` otherwise). `POST /labs/{labId}/publish` accepts an empty body or `application/json`.
+- **Request `Content-Type`:** `application/json` is mandatory on `PATCH` writes (`415 Unsupported Media Type` otherwise). `POST /labs/{labId}/publish` accepts an empty body or `application/json`. Raw JSON bodies > **512 KiB** return `413 Payload Too Large`.
 - **Success `Content-Type`:** `application/json`.
 - **Error `Content-Type`:** `application/problem+json` ([RFC 9457](https://datatracker.ietf.org/doc/html/rfc9457)).
+- **Path Versioning:** Every route is served equivalently at its baseline path and under the `/v1` prefix (e.g., `/v1/labs/{labId}/review-queue`). RFC 9457 `instance` reflects the requested URL path.
+- **Identifiers:** Opaque prefixed strings — labs (`lab_*`), submissions (`sub_<uuid>`), constraint findings (`fnd_*`), constraints (`con_*` / `C1..Cn`), users (`usr_*` / `std_*`).
 - **Timestamps:** ISO 8601 UTC strings (e.g. `2026-11-25T10:00:00.000Z`).
 - **Scores & Deductions:** Decimal points in `[0, 10]` at HTTP edges; stored internally in PostgreSQL as integer centipoints `[0, 1000]` to prevent floating-point drift.
 - **Execution Metrics:** `timeMs` in milliseconds (`>= 0`), `memoryKb` in kilobytes (`>= 0`).
@@ -25,6 +27,8 @@
 
 ### 1.2 Authentication, Roles & Ownership
 All endpoints in this contract require a signed `HS256` Bearer JWT (`Authorization: Bearer <token>`). Missing, malformed, invalid-signature, or expired tokens return `401 Unauthorized`.
+
+**Authorization Status Policy:** Unauthenticated callers receive `401`. Authenticated callers lacking role permission or class/submission ownership receive `403 Forbidden` (pinned across PA#2/PA#3 contracts and `PA3_rubric.md` Criterion 1). Missing `labId`, `submissionId` (or belonging to a different lab), or `findingId` returns `404 Not Found`.
 
 | Endpoint | `STUDENT` (Enrolled) | `STUDENT` (Not Enrolled) | `TA` (Owning Class) | `TA` (Other Class) | `ADMIN` |
 |---|:---:|:---:|:---:|:---:|:---:|
@@ -36,7 +40,7 @@ All endpoints in this contract require a signed `HS256` Bearer JWT (`Authorizati
 | `PATCH /labs/{labId}/submissions/{submissionId}/findings/{findingId}` | `403 Forbidden` | `403 Forbidden` | `200 OK` | `403 Forbidden` | `200 OK` |
 | `POST /labs/{labId}/publish` | `403 Forbidden` | `403 Forbidden` | `200 OK` | `403 Forbidden` | `200 OK` |
 
-### 1.3 Privacy & Grading Visibility Matrix (Syllabus Rule)
+### 1.3 Privacy, Grading Visibility & Keyset Pagination Conventions
 1. **Student Before Publish (`isPublished === false`, `FAQ-02`, `FAQ-08`):**
    - Student responses return **only** pipeline status, `overallVerdict`, `passedTests`, `totalTests`, `maxTimeMs`, `maxMemoryKb`, `isCounting`, `submittedAt`, and `testVerdicts[]` (`ordinal`, `verdict`, `timeMs`, `memoryKb`).
    - Student responses **strictly omit** `code`, test `input`, `expectedOutput`, `actualOutput`, compiler/runtime internals, and **all** checker/review fields (`findings`, `verdict`, `source`, `evidence`, `unsureReason`, `reason`, `proposedDeduction`, `deductions`, `finalScore`, `isSampledPass`).
@@ -48,24 +52,51 @@ All endpoints in this contract require a signed `HS256` Bearer JWT (`Authorizati
    - Default queue (`scope=counted`) evaluates only each student's **counted** (`isCounting === true`) `AC` submission.
    - Included findings: **100%** of `violation`, **100%** of `unsure`, and **10% rounded up** (`Math.ceil(0.10 * totalPassFindings)`) of `pass` findings across counted `AC` submissions in the lab, selected randomly (at least 1 when `totalPassFindings >= 1`).
    - TAs can inspect **any** submission in their lab (including non-`AC`, superseded, or non-sampled `pass` submissions) via `GET /labs/{labId}/submissions` + `GET /labs/{labId}/submissions/{submissionId}/review` (or `GET /submissions/{submissionId}`) and override any finding (`FAQ-10`).
+4. **Keyset Cursor Pagination (`GET /labs/{labId}/submissions`, `GET /labs/{labId}/review-queue`):**
+   - Query params: `cursor` (optional opaque Base64URL string), `limit` (optional integer `1..100`, default `50`).
+   - Stable unique sort keys (never `OFFSET`):
+     - `GET /labs/{labId}/submissions`: `(submittedAt DESC, id DESC)`, scope `lab-submissions:{labId}:{studentId | all}`.
+     - `GET /labs/{labId}/review-queue`: `(submittedAt DESC, submissionId DESC, constraintCode ASC)`, scope `review-queue:{labId}:{scope}`.
+   - Server fetches `limit + 1` rows; `nextCursor` is `null` iff no further rows remain.
+   - Malformed cursors, cursors replayed across a different `labId` / `scope` / endpoint, or `limit` outside `1..100` return `400 Bad Request`.
+   - Inserting newer submissions ahead of the cursor never shifts or duplicates items already returned on earlier pages; records removed or excluded by filter changes simply do not appear on subsequent pages.
 
 ---
 
 ## 2. Errors
 
-Every error response returns `Content-Type: application/problem+json` with required members `type`, `title`, `status`, `detail`, and `instance`. Clients branch on `type`, never on `detail` text.
+Every error response returns `Content-Type: application/problem+json` with required members `type`, `title`, `status`, `detail`, and `instance`. Clients branch on `type`, never on `title` or `detail`.
 
-| Status | `type` URI | `title` | Triggering Conditions |
-|:---:|---|---|---|
-| `400` | `https://leetkob.edu.vn/errors/bad-request` | `Bad Request` | Invalid `scope` query param; invalid `decision` / `deduction` / `evidence` item; `decision === 'VIOLATION'` without $\ge 1$ evidence line (`FAQ-09`); modifying a finding after Publish without a non-empty `reason` (`FAQ-12`). |
-| `401` | `https://leetkob.edu.vn/errors/unauthorized` | `Unauthorized` | Missing, malformed, invalid-signature, or expired Bearer JWT. |
-| `403` | `https://leetkob.edu.vn/errors/forbidden` | `Forbidden` | Student accessing another student's submission (IDOR) or TA review/publish endpoints; TA accessing a lab outside assigned `class_staff`; unenrolled student accessing class lab. |
-| `404` | `https://leetkob.edu.vn/errors/not-found` | `Not Found` | Unknown `labId`, `submissionId` (or not belonging to `labId`), or `findingId`. |
-| `409` | `https://leetkob.edu.vn/errors/conflict` | `Conflict` | `POST /labs/{labId}/publish` refused because: (a) `now < deadline` (`FAQ-12`), (b) any counted submission is not yet `COMPLETED` (`FAQ-03`), (c) any counted `AC` submission has `checkerStatus !== 'COMPLETED'`, or (d) any counted finding still has `reviewStatus === 'PENDING_REVIEW'` (`FAQ-12`). |
-| `415` | `https://leetkob.edu.vn/errors/unsupported-media-type` | `Unsupported Media Type` | `PATCH` write missing `Content-Type: application/json`. |
-| `500` | `https://leetkob.edu.vn/errors/internal-error` | `Internal Server Error` | Unexpected server/database failure (fixed safe detail; never exposes SQL, paths, or stack traces). |
+- **Field-Level Validation Reporting (`errors[]`):** For body validation failures on `PATCH /labs/{labId}/submissions/{submissionId}/findings/{findingId}`, the `400 Bad Request` problem includes `errors: Array<{ field: string; message: string }>` listing **every** invalid field, while `detail` carries the first message.
+- **Internal Server Errors (`500`):** Fixed safe detail only; attaches response header `X-Request-Id` and logs full stack internally without exposing SQL, paths, or stack traces.
 
-### Example Problem Response (`409 Conflict`)
+| Status | `type` URI | `title` | Triggering Conditions | Extensions / Headers |
+|:---:|---|---|---|---|
+| `400` | `https://leetkob.edu.vn/errors/bad-request` | `Bad Request` | Malformed JSON; invalid `scope` query param; malformed/out-of-scope `cursor` or `limit` outside `1..100`; invalid `decision` / `deduction` / `evidence` / `reason`; `decision === 'VIOLATION'` without $\ge 1$ evidence line (`FAQ-09`); modifying a finding after Publish without a non-empty `reason` (`FAQ-12`). | `errors[]` on `PATCH` body validation errors |
+| `401` | `https://leetkob.edu.vn/errors/unauthorized` | `Unauthorized` | Missing, malformed, invalid-signature, or expired Bearer JWT. | — |
+| `403` | `https://leetkob.edu.vn/errors/forbidden` | `Forbidden` | Student accessing another student's submission (IDOR) or TA review/publish endpoints; TA accessing a lab outside assigned `class_staff`; unenrolled student accessing class lab. | — |
+| `404` | `https://leetkob.edu.vn/errors/not-found` | `Not Found` | Unknown `labId`, `submissionId` (or not belonging to `labId`), `findingId`, or unknown route. | — |
+| `409` | `https://leetkob.edu.vn/errors/conflict` | `Conflict` | `POST /labs/{labId}/publish` refused because: (a) `now < deadline` (`FAQ-12`), (b) any counted submission is not yet `COMPLETED` (`FAQ-03`), (c) any counted `AC` submission has `checkerStatus !== 'COMPLETED'`, or (d) any counted finding still has `reviewStatus === 'PENDING_REVIEW'` (`FAQ-12`). | — |
+| `413` | `https://leetkob.edu.vn/errors/payload-too-large` | `Payload Too Large` | Raw JSON HTTP body exceeds 512 KiB transport limit. | — |
+| `415` | `https://leetkob.edu.vn/errors/unsupported-media-type` | `Unsupported Media Type` | `PATCH` write missing `Content-Type: application/json`. | — |
+| `500` | `https://leetkob.edu.vn/errors/internal-server-error` | `Internal Server Error` | Unexpected server/database failure (fixed safe detail; stack logged internally with `requestId`). | Header `X-Request-Id` |
+
+### Example Problem Responses (`application/problem+json`)
+- **400 Validation Error (`PATCH` with `errors[]`):**
+```json
+{
+  "type": "https://leetkob.edu.vn/errors/bad-request",
+  "title": "Bad Request",
+  "status": 400,
+  "detail": "Field 'decision' is required and must be 'PASS' or 'VIOLATION'.",
+  "instance": "/labs/lab_1/submissions/sub_1/findings/fnd_1",
+  "errors": [
+    { "field": "decision", "message": "Field 'decision' is required and must be 'PASS' or 'VIOLATION'." },
+    { "field": "deduction", "message": "Field 'deduction' must be a finite number between 0 and 10." }
+  ]
+}
+```
+- **409 Conflict (`POST /labs/{labId}/publish`):**
 ```json
 {
   "type": "https://leetkob.edu.vn/errors/conflict",
@@ -98,9 +129,23 @@ Used inside `GET /labs/{labId}/submissions`:
   "submittedAt": "2026-11-21T07:30:00.000Z"
 }
 ```
-- `status`: `"QUEUED" | "JUDGING" | "COMPLETED" | "JUDGE_ERROR"`.
-- `overallVerdict`: `"AC" | "WA" | "TLE" | "MLE" | "RE" | "CE" | null`.
-- `code` and checker findings are always omitted.
+
+| Field | Type | Nullable | Rules |
+|---|---|:---:|---|
+| `id` | `string` | No | Opaque submission ID (`sub_*`). |
+| `labId` | `string` | No | Owning lab ID. |
+| `studentId` | `string` | No | Submitting student ID. |
+| `studentName` | `string` | Optional | Display name fallback to username/ID. |
+| `status` | `"QUEUED" \| "JUDGING" \| "COMPLETED" \| "JUDGE_ERROR"` | No | Execution pipeline state. |
+| `overallVerdict` | `"AC" \| "WA" \| "TLE" \| "MLE" \| "RE" \| "CE" \| null` | Yes | Non-null iff `status === "COMPLETED"`. |
+| `passedTests` | `integer` | No | `0 <= passedTests <= totalTests`. |
+| `totalTests` | `integer` | No | Total test count (`>= 0`). |
+| `maxTimeMs` | `integer \| null` | Yes | Peak test runtime in ms (`>= 0`) or `null`. |
+| `maxMemoryKb` | `integer \| null` | Yes | Peak test memory in KB (`>= 0`) or `null`. |
+| `isCounting` | `boolean` | No | `true` iff latest counted submission (`FAQ-02`). |
+| `submittedAt` | `string (ISO 8601)` | No | Server receipt UTC timestamp. |
+
+- **Omitted fields:** `code` and all checker findings are always omitted.
 
 ### 3.2 `StudentSubmissionResultView`
 - **Before Publish (`isPublished: false`):** Strictly omits `code`, `publishedAt`, `finalScore`, `deductions`, `findings`, `evidence`, `unsureReason`, `isSampledPass`, and any test `input`/`expectedOutput`/`actualOutput`.
@@ -158,6 +203,7 @@ Used inside `GET /labs/{labId}/submissions`:
 ```
 
 ### 3.3 `TaReviewFindingView`
+Used in `GET /labs/{labId}/review-queue` (`items[]`) and `GET /labs/{labId}/submissions/{submissionId}/review` (`findings[]`):
 ```json
 {
   "findingId": "fnd_sub1_C1",
@@ -186,9 +232,43 @@ Used inside `GET /labs/{labId}/submissions`:
   "reviewedAt": null
 }
 ```
-- `unsureReason`: one of `MODEL_UNSURE | SCHEMA_INVALID | EVIDENCE_MISMATCH | TIMEOUT | COST_CAP_EXCEEDED | MODEL_OFF | PROVIDER_ERROR | null` (`FAQ-09`, [checker-output.md](checker-output.md)). Non-null if and only if `verdict === "unsure"`.
+- `unsureReason`: one of `MODEL_UNSURE | SCHEMA_INVALID | EVIDENCE_MISMATCH | TIMEOUT | COST_CAP_EXCEEDED | MODEL_OFF | PROVIDER_ERROR | null` (`FAQ-09`, [checker-output.md](checker-output.md)). Non-null iff `verdict === "unsure"`.
 - `proposedDeduction`: equals `configuredDeduction` when `verdict === "violation"`, and `0` when `verdict` is `"pass"` or `"unsure"`.
 - `reviewStatus`: `"NOT_QUEUED" | "PENDING_REVIEW" | "APPROVED_VIOLATION" | "DISMISSED_PASS" | "OVERRIDDEN"`.
+
+### 3.4 `ConstraintFindingRecord` (`PATCH .../findings/{findingId}` Response)
+Returned by `PATCH /labs/{labId}/submissions/{submissionId}/findings/{findingId}`. Note that this persisted record uses `id` (the primary key of `constraint_findings`), whereas the joined `TaReviewFindingView` projects it as `findingId`.
+```json
+{
+  "id": "fnd_sub1_C1",
+  "submissionId": "sub_9f8c1b82-412e-4b68-8a8b-18a7c6f0923e",
+  "labId": "lab_018f2d5e-7a91-7f3c-b26a-98124d63e001",
+  "constraintId": "con_lab1_C1",
+  "constraintCode": "C1",
+  "source": "HARD_RULE",
+  "verdict": "violation",
+  "unsureReason": null,
+  "evidence": [{ "line": 12, "text": "std::sort(a, a + n);" }],
+  "reason": "AST detected banned call to std::sort.",
+  "isSampledPass": false,
+  "reviewStatus": "APPROVED_VIOLATION",
+  "taDecision": "VIOLATION",
+  "taDeduction": 3,
+  "taEvidence": [{ "line": 12, "text": "std::sort(a, a + n);" }],
+  "taReason": "Confirmed direct call to std::sort.",
+  "reviewedBy": "usr_ta_01",
+  "reviewedAt": "2026-11-25T09:50:00.000Z"
+}
+```
+
+### 3.5 `PublishLabResponse`
+```json
+{
+  "labId": "lab_018f2d5e-7a91-7f3c-b26a-98124d63e001",
+  "isPublished": true,
+  "publishedAt": "2026-11-25T10:00:00.000Z"
+}
+```
 
 ---
 
@@ -196,8 +276,18 @@ Used inside `GET /labs/{labId}/submissions`:
 
 ### 4.1 `GET /labs/{labId}/submissions`
 - **Auth:** `STUDENT` (enrolled), `TA` (owning class), `ADMIN`.
+- **Query Params:** `cursor` (optional opaque Base64URL keyset cursor), `limit` (optional integer `1..100`, default `50`).
 - **Ordering:** `submittedAt DESC, id DESC`.
-- **Response (`200 OK`):** `{ "labId": "...", "isPublished": false, "submissions": SubmissionSummaryItem[] }`. For `STUDENT`, contains only caller's own submissions; for `TA`/`ADMIN`, contains all submissions in the lab (enabling live-demo lookup of any submission).
+- **Response (`200 OK`):**
+```json
+{
+  "labId": "lab_018f2d5e-7a91-7f3c-b26a-98124d63e001",
+  "isPublished": false,
+  "submissions": [],
+  "nextCursor": null
+}
+```
+For `STUDENT`, contains only caller's own submissions; for `TA`/`ADMIN`, contains all submissions in the lab.
 
 ### 4.2 `GET /labs/{labId}/submissions/{submissionId}`
 - **Auth:** `STUDENT` (own submission in enrolled class; other student's → `403`), `TA` (owning class), `ADMIN`.
@@ -211,7 +301,11 @@ Used inside `GET /labs/{labId}/submissions`:
 
 ### 4.4 `GET /labs/{labId}/review-queue`
 - **Auth:** `TA` (owning class) or `ADMIN` (`STUDENT` and other-class `TA` → `403`).
-- **Query Params:** `scope` = `"counted"` (default) | `"all"`. Any other value → `400 Bad Request`.
+- **Query Params:**
+  - `scope`: `"counted"` (default) | `"all"`. Any other value → `400 Bad Request`.
+  - `cursor`: optional opaque Base64URL keyset cursor bound to `(labId, scope)`.
+  - `limit`: optional integer `1..100` (default `50`).
+- **Ordering:** `(submittedAt DESC, submissionId DESC, constraintCode ASC)`.
 - **Response (`200 OK`):**
 ```json
 {
@@ -221,15 +315,17 @@ Used inside `GET /labs/{labId}/submissions`:
   "isPublished": false,
   "publishedAt": null,
   "pendingReviewCount": 2,
-  "items": []
+  "items": [],
+  "nextCursor": null
 }
 ```
+- `pendingReviewCount` always reflects the total `PENDING_REVIEW` count across the entire matching queue (not only the current page) so TA Publish readiness stays accurate during pagination.
 - When `scope=counted`: includes only `isCounting === true` `AC` submissions and queued findings (`verdict === 'violation' || verdict === 'unsure' || isSampledPass === true || reviewStatus !== 'NOT_QUEUED'`).
 - When `scope=all`: includes all `AC` submissions in the lab and all of their findings.
 
 ### 4.5 `GET /labs/{labId}/submissions/{submissionId}/review`
 - **Auth:** `TA` (owning class) or `ADMIN` (`STUDENT` and other-class `TA` → `403`).
-- **Response (`200 OK`):**
+- **Response (`200 OK`):** `TaSubmissionReviewResponse`:
 ```json
 {
   "labTitle": "Sorting Lab — Merge Sort",
@@ -269,36 +365,32 @@ Used inside `GET /labs/{labId}/submissions`:
 }
 ```
 - **Validation Order & Rules:**
-  1. `Content-Type` must be `application/json` (`415`).
-  2. `decision` must be `"PASS"` or `"VIOLATION"` (`400`).
-  3. `deduction` (optional): finite number in `[0, 10]` (`400`). Defaults to the lab constraint's `configuredDeduction` when `decision === "VIOLATION"`, forced to `0` when `decision === "PASS"`.
-  4. `evidence`: required array (`length >= 1`, each `{ line: int >= 1, text: non-empty string }`) when `decision === "VIOLATION"` (`400`, `FAQ-09`).
-  5. `reason`: optional string or `null` before Publish; **required non-empty string after Publish** (`lab.isPublished === true`, else `400`, `FAQ-12`).
-- **Persistence & Audit:** Atomically updates `constraint_findings` (`reviewStatus` → `"APPROVED_VIOLATION"` or `"DISMISSED_PASS"`) and inserts a `TA_REVIEW_FINDING` row into `audit_logs` capturing both `before_state` (previous `reviewStatus`, `taDecision`, `taDeduction`) and `after_state` (`FAQ-10`, `FAQ-12`). On any `4xx` refusal, zero rows change.
-- **Response (`200 OK`):** Updated `ConstraintFindingRecord`.
+  1. Body parser (`413`/`400`) → JWT (`401`) → `Content-Type: application/json` (`415`).
+  2. Multi-field body validation (collects all invalid fields into `errors[]`, returns `400`):
+     - `decision`: required `"PASS"` or `"VIOLATION"`.
+     - `deduction` (optional): finite number in `[0, 10]`. Defaults to the lab constraint's `configuredDeduction` when `decision === "VIOLATION"`, forced to `0` when `decision === "PASS"`.
+     - `evidence`: array of `{ line: int >= 1, text: non-empty string }`; required non-empty (`length >= 1`) when `decision === "VIOLATION"` (`FAQ-09`).
+     - `reason`: optional string or `null` before Publish; **required non-empty string after Publish** (`lab.isPublished === true`, else `400`, `FAQ-12`).
+  3. Authorization (`TA` owning class or `ADMIN` → `403`) → existence of `labId` / `submissionId` / `findingId` (`404`).
+- **Persistence & Audit:** Atomically updates `constraint_findings` (`reviewStatus` → `"APPROVED_VIOLATION"` or `"DISMISSED_PASS"`) and inserts a `TA_REVIEW_FINDING` row into `audit_logs` capturing both `before_state` and `after_state` (`FAQ-10`, `FAQ-12`). On any `4xx`/`5xx` refusal, zero rows change.
+- **Response (`200 OK`):** Updated `ConstraintFindingRecord` (Section 3.4).
 
 ### 4.7 `POST /labs/{labId}/publish`
 - **Auth:** `TA` (owning class) or `ADMIN` (`STUDENT` and other-class `TA` → `403`).
-- **Transactional Gate & Idempotency (`FAQ-03`, `FAQ-10`, `FAQ-12`):**
-  1. Lock the lab row (`SELECT ... FOR UPDATE`). If already published (`publishedAt !== null`), commit and return `200 OK` with the original `publishedAt` (safe idempotent retry).
+- **Transactional Gate & State Idempotency (`FAQ-03`, `FAQ-10`, `FAQ-12`):**
+  1. Lock the lab row (`SELECT ... FOR UPDATE`). If already published (`publishedAt !== null`), commit and return `200 OK` with the original `publishedAt` (safe idempotent retry without needing a client key).
   2. If `now < deadline` → `409 Conflict` (`ROLLBACK`, no mutation).
   3. If any counted submission (`isCounting === true`) has `status !== 'COMPLETED'` (still `QUEUED`, `JUDGING`, or `JUDGE_ERROR`) → `409 Conflict` (`ROLLBACK`, no mutation).
   4. If any counted `AC` submission has `checkerStatus !== 'COMPLETED'` → `409 Conflict` (`ROLLBACK`, no mutation).
   5. Rebalance the `FAQ-10` 10% `pass` sample across counted `AC` submissions.
   6. If any finding on a counted submission has `reviewStatus === 'PENDING_REVIEW'` → `409 Conflict` (`ROLLBACK`, no mutation).
-  7. Set `labs.published_at = NOW()`, insert `PUBLISH_LAB_GRADES` into `audit_logs`, commit, and return `200 OK`:
-```json
-{
-  "labId": "lab_018f2d5e-7a91-7f3c-b26a-98124d63e001",
-  "isPublished": true,
-  "publishedAt": "2026-11-25T10:00:00.000Z"
-}
-```
+  7. Set `labs.published_at = NOW()`, insert `PUBLISH_LAB_GRADES` into `audit_logs`, commit, and return `200 OK` (`PublishLabResponse`, Section 3.5).
 
 ---
 
 ## 5. Versions and the Legacy API
 
-1. **Compatible (Non-Breaking) Additions:** Adding optional metadata fields to summary/review responses (e.g., `labTitle`, `studentName`, `maxTimeMs`, `maxMemoryKb`, `publishedAt`) or optional query filters without altering existing required keys or pre-publish student redaction invariants.
-2. **Breaking Changes:** Changing RFC 9457 error `type` URIs, weakening pre-publish student redaction, altering `decision` / `verdict` / `unsureReason` enums, or changing `POST /labs/{labId}/publish` idempotency semantics requires path versioning (`/v2/...`).
-3. **Legacy Route Compatibility:** Both `GET /labs/{labId}/submissions/{submissionId}` (PA#3 canonical) and `GET /submissions/{submissionId}` (Web UI direct alias) are supported concurrently with identical authorization and Syllabus Rule enforcement.
+1. **Active Path Versioning (`/v1` & Baseline Alias):** All endpoints in this contract are served identically at `/v1/...` and their unprefixed baseline paths.
+2. **Compatible (Non-Breaking) Additions:** Adding optional query params (`cursor`, `limit`), additive response pagination (`nextCursor`), optional `errors[]` extensions on `400`, `X-Request-Id` header on `500`, or additive metadata fields (`labTitle`, `studentName`, `maxTimeMs`, `maxMemoryKb`, `publishedAt`) without altering existing required keys or pre-publish student redaction invariants. Clients MUST ignore unknown JSON fields.
+3. **Breaking Changes:** Changing RFC 9457 error `type` URIs, weakening pre-publish student redaction, altering `decision` / `verdict` / `unsureReason` enums, or changing `POST /labs/{labId}/publish` idempotency semantics requires path versioning (`/v2/...`) with `Deprecation` (RFC 9745), `Sunset` (RFC 8594), and `Link` headers during migration.
+4. **Legacy Route Compatibility:** Both `GET /labs/{labId}/submissions/{submissionId}` (PA#3 canonical) and `GET /submissions/{submissionId}` (Web UI direct alias) are supported concurrently with identical authorization and Syllabus Rule enforcement.
