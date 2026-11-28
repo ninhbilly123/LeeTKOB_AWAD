@@ -602,6 +602,7 @@ Team Members:
 ---
 
 ## 2026-11-28 — Implement Task D3: Team-Authored Eval Dataset (`leetkob-eval-team/`) & Offline Integrity Tests (Phạm An Ninh)
+
 - **Tool**: Antigravity.
 - **Asked for**: Implement Task D3 (`pa3-team-tasks.md`) on branch `feat/d3-team-eval-cases`: create a separate team-authored eval dataset matching the `leetkob-eval/` layout (`problems/`, `solutions/`, `labels.jsonl`) with at least 5 genuinely Accepted C++17 solutions, accurate labels, tags, and evidence lines (including >=1 `trap` and >=1 `injection`), verify zero diff on the lecturer's `leetkob-eval/` files, and hand off for Khoa's Checker CLI run.
 - **Kept**:
@@ -619,3 +620,19 @@ Team Members:
   - Ran `MODEL_OFF=1 python -m src --data ../leetkob-eval-team` and scored with unmodified `node leetkob-eval/eval.mjs --data leetkob-eval-team`: `exit 1` (valid dataset/predictions, never `exit 2`), `0` wrongful deductions, `2/2` ban-list violations caught with exact line text (`stack-brackets/s03 C1` line 7, `kth-element/s03 C1` line 8), `0` false positives on traps, and `8/8` semantic pairs returned `unsure`.
   - Verified `git diff leetkob-eval/` is empty (`DEV_DIFF_LENGTH=0`) and SHA-256 hashes match byte-for-byte.
   - Ran all four canonical offline quality gates: `npm run lint`, `npm run format:check`, `npm run typecheck`, `npm run test` (**155/155 passed**: 92 Gateway + 11 Web + 19 Judge + 33 Checker).
+
+---
+
+## 2026-11-28 — Align All HTTP API Contracts with `write-api-contract` Skill (Phạm An Ninh)
+- **Tool**: Antigravity.
+- **Asked for**: Audit all implemented HTTP endpoints across `gateway/` and `checker/` against `docs/contract/` and `.agents/skills/write-api-contract/SKILL.md`, then standardize `docs/contract/auth-and-labs.md` and `docs/contract/post-submissions.md` to the exact 5-section IA#3 format with complete endpoint specifications.
+- **Kept**:
+  - Preserved 100% of existing endpoint behavior, status codes, RFC 9457 error `type` URIs, idempotency semantics, and the `#6-idempotency-specification` HTML anchor referenced by `docs/engineering-rules.md`.
+  - Kept `reviews-and-results.md` (already 5-section IA#3), `checker-output.md`, and `queue-and-judge.md` (producer/consumer internal contracts) unchanged.
+- **Changed**:
+  - Restructured `docs/contract/auth-and-labs.md` into the 5-section IA#3 outline (`1. Conventions`, `2. Errors`, `3. Resources`, `4. Endpoints`, `5. Versions and the Legacy API`) and added full request/response specifications for `GET /health`, `GET /auth/me`, `GET/POST /classes`, `GET/POST /classes/{classId}/labs`, `email` login support, `409` duplicate class code, and `503` unhealthy DB probe.
+  - Restructured `docs/contract/post-submissions.md` into the same 5-section IA#3 outline and updated Section 1 to accurately describe the PA#3 PostgreSQL 16 atomic transaction + `submission_jobs` outbox while preserving all PA#2 error URIs and idempotency guarantees.
+- **Rejected**:
+  - Altering any existing RFC 9457 error URI (`deadline-passed`, `idempotency-conflict`, `internal-server-error`) or modifying application/test code in this documentation-only alignment PR.
+- **Validation**:
+  - Audited all 17 Gateway controller routes + 2 Checker internal HTTP routes against all 5 files in `docs/contract/` (19/19 routes covered). Documentation-only change; verified `git diff` and internal markdown anchors.
