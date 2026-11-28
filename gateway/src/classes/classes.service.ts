@@ -1,9 +1,12 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import { HttpStatus, Injectable, Optional } from '@nestjs/common';
+import { createHash, randomUUID } from 'node:crypto';
 import { AuthStore } from '../auth/auth.store';
 import { problemException } from '../common/http-problems';
+import { encodeKeysetCursor, parseKeysetPagination } from '../common/pagination';
 import { CreateLabInput } from '../labs/dto/create-lab.dto';
 import { LabsService, LabStudentView } from '../labs/labs.service';
+import { LabsStore } from '../labs/labs.store';
+import { PostgresPersistence } from '../persistence/postgres.store';
 import { SubmissionStore } from '../submissions/submissions.store';
 import { Lab, UserRole } from '../submissions/submissions.types';
 import { ClassesStore, ClassSummaryRecord } from './classes.store';
@@ -20,62 +23,7 @@ export interface CreateClassPayload {
   taIds: string[];
 }
 
-interface DecodedCursor {
-  offset: number;
-}
-
-function parsePaginationParams(
-  rawCursor?: string,
-  rawLimit?: string,
-): { offset: number; limit: number } {
-  let limit = 20;
-  if (rawLimit !== undefined && rawLimit.trim() !== '') {
-    const parsed = Number(rawLimit);
-    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 100) {
-      throw problemException(
-        HttpStatus.BAD_REQUEST,
-        "Query parameter 'limit' must be an integer between 1 and 100.",
-      );
-    }
-    limit = parsed;
-  }
-
-  let offset = 0;
-  if (rawCursor !== undefined && rawCursor.trim() !== '') {
-    try {
-      const json = Buffer.from(rawCursor, 'base64url').toString('utf8');
-      const parsed = JSON.parse(json) as Partial<DecodedCursor>;
-      if (
-        typeof parsed.offset !== 'number' ||
-        !Number.isInteger(parsed.offset) ||
-        parsed.offset < 0
-      ) {
-        throw new Error('Invalid cursor offset');
-      }
-      offset = parsed.offset;
-    } catch {
-      throw problemException(
-        HttpStatus.BAD_REQUEST,
-        "Query parameter 'cursor' is malformed or invalid.",
-      );
-    }
-  }
-  return { offset, limit };
-}
-
-function encodeCursor(offset: number): string {
-  return Buffer.from(JSON.stringify({ offset }), 'utf8').toString('base64url');
-}
-
-function paginateItems<T>(all: T[], offset: number, limit: number): CursorPage<T> {
-  const slice = all.slice(offset, offset + limit + 1);
-  const hasMore = slice.length > limit;
-  const items = hasMore ? slice.slice(0, limit) : slice;
-  return {
-    items,
-    nextCursor: hasMore ? encodeCursor(offset + limit) : null,
-  };
-}
+const DEFAULT_LAB_CREATED_AT = '2026-11-01T00:00:00.000Z';
 
 @Injectable()
 export class ClassesService {
@@ -84,6 +32,8 @@ export class ClassesService {
     private readonly authStore: AuthStore,
     private readonly labsService: LabsService,
     private readonly submissionStore: SubmissionStore,
+    private readonly labsStore: LabsStore,
+    @Optional() private readonly postgres?: PostgresPersistence,
   ) {}
 
   async listClasses(
@@ -92,36 +42,76 @@ export class ClassesService {
     rawCursor?: string,
     rawLimit?: string,
   ): Promise<CursorPage<ClassSummaryRecord>> {
-    const { offset, limit } = parsePaginationParams(rawCursor, rawLimit);
-    const [classes, visibleLabs] = await Promise.all([
-      this.classesStore.listClassesForUserAsync(userId, role),
-      this.labsService.listLabs(userId, role),
-    ]);
+    const scope = 'classes';
+    const { cursor, limit } = parseKeysetPagination(rawCursor, rawLimit, scope, {
+      defaultLimit: 20,
+    });
+    const rows = await this.classesStore.listClassesPageForUserAsync(userId, role, cursor, limit);
+    const hasMore = rows.length > limit;
+    const pageRows = hasMore ? rows.slice(0, limit) : rows;
 
-    const labCountByClass = new Map<string, number>();
-    for (const lab of visibleLabs) {
-      labCountByClass.set(lab.classId, (labCountByClass.get(lab.classId) ?? 0) + 1);
+    let enriched = pageRows;
+    if (!this.postgres?.isEnabled() && pageRows.length > 0) {
+      const visibleLabs = await this.labsService.listLabs(userId, role);
+      const labCountByClass = new Map<string, number>();
+      for (const lab of visibleLabs) {
+        labCountByClass.set(lab.classId, (labCountByClass.get(lab.classId) ?? 0) + 1);
+      }
+      enriched = pageRows.map((cls) => ({
+        ...cls,
+        labCount: labCountByClass.get(cls.id) ?? cls.labCount,
+      }));
     }
 
-    const enriched = classes.map((cls) => ({
-      ...cls,
-      labCount: labCountByClass.get(cls.id) ?? cls.labCount,
-    }));
-    return paginateItems(enriched, offset, limit);
+    const last = enriched[enriched.length - 1];
+    return {
+      items: enriched,
+      nextCursor:
+        hasMore && last ? encodeKeysetCursor({ s: scope, t: last.createdAt, id: last.id }) : null,
+    };
   }
 
   async createClass(
     actorId: string,
     actorRole: UserRole,
     input: CreateClassPayload,
+    idempotencyKey?: string,
   ): Promise<ClassSummaryRecord> {
     if (actorRole !== 'ADMIN') {
       throw problemException(HttpStatus.FORBIDDEN, 'Only ADMIN users may create classes (FAQ-01).');
     }
 
-    const existing = await this.classesStore.listClassesForUserAsync(actorId, 'ADMIN');
-    if (existing.some((c) => c.code.toLowerCase() === input.code.toLowerCase())) {
-      throw problemException(HttpStatus.CONFLICT, `Class code '${input.code}' already exists.`);
+    const nowMs = Date.now();
+    const payloadHash = idempotencyKey
+      ? createHash('sha256')
+          .update(
+            JSON.stringify({
+              scope: 'POST /classes',
+              code: input.code,
+              name: input.name,
+              term: input.term,
+              taIds: input.taIds,
+            }),
+          )
+          .digest('hex')
+      : undefined;
+
+    if (idempotencyKey && !this.postgres?.isEnabled()) {
+      const cached = this.submissionStore.getIdempotencyRecord<ClassSummaryRecord>(
+        actorId,
+        idempotencyKey,
+        nowMs,
+      );
+      if (cached) {
+        if (cached.payloadHash !== payloadHash) {
+          throw problemException(
+            HttpStatus.CONFLICT,
+            'The provided Idempotency-Key has already been used with different request parameters.',
+            'idempotency-conflict',
+          );
+        }
+        return { ...cached.responseBody, taIds: [...cached.responseBody.taIds] };
+      }
     }
 
     const record: ClassSummaryRecord = {
@@ -134,9 +124,32 @@ export class ClassesService {
       taIds: input.taIds,
       studentCount: 0,
       labCount: 0,
-      createdAt: new Date().toISOString(),
+      createdAt: new Date(nowMs).toISOString(),
     };
-    return this.classesStore.createClassAsync(record);
+
+    const created = await this.classesStore.createClassAsync(
+      record,
+      idempotencyKey && payloadHash ? { actorId, idempotencyKey, payloadHash, nowMs } : undefined,
+    );
+
+    if (idempotencyKey && payloadHash && !this.postgres?.isEnabled()) {
+      this.submissionStore.saveIdempotencyRecord<ClassSummaryRecord>({
+        key: idempotencyKey,
+        studentId: actorId,
+        labId: null,
+        payloadHash,
+        statusCode: 201,
+        responseHeaders: {
+          Location: `/classes/${created.id}`,
+          'Content-Type': 'application/json',
+        },
+        responseBody: created,
+        createdAt: new Date(nowMs).toISOString(),
+        expiresAt: new Date(nowMs + 24 * 60 * 60 * 1000).toISOString(),
+      });
+    }
+
+    return created;
   }
 
   async listClassLabs(
@@ -148,16 +161,39 @@ export class ClassesService {
   ): Promise<
     CursorPage<(Lab | LabStudentView) & { submissionCount?: number; pendingReviewCount?: number }>
   > {
-    const { offset, limit } = parsePaginationParams(rawCursor, rawLimit);
+    const scope = `class-labs:${classId}`;
+    const { cursor, limit } = parseKeysetPagination(rawCursor, rawLimit, scope, {
+      defaultLimit: 20,
+    });
     await this.assertClassReadable(classId, userId, role);
-    const allLabs = await this.labsService.listLabs(userId, role);
-    const filtered = allLabs.filter((lab) => lab.classId === classId);
-    const page = paginateItems(filtered, offset, limit);
+
+    const rawRows = await this.labsStore.listClassLabsPageAsync(
+      classId,
+      role === 'STUDENT',
+      cursor,
+      limit,
+    );
+    const hasMore = rawRows.length > limit;
+    const pageRaw = hasMore ? rawRows.slice(0, limit) : rawRows;
+    const lastRaw = pageRaw[pageRaw.length - 1];
+    const nextCursor =
+      hasMore && lastRaw
+        ? encodeKeysetCursor({
+            s: scope,
+            t: lastRaw.createdAt ?? DEFAULT_LAB_CREATED_AT,
+            id: lastRaw.id,
+          })
+        : null;
+
     if (role === 'STUDENT') {
-      return page;
+      return {
+        items: pageRaw.map((lab) => this.labsService.toStudentView(lab)),
+        nextCursor,
+      };
     }
+
     const enrichedItems = await Promise.all(
-      page.items.map(async (lab) => {
+      pageRaw.map(async (lab) => {
         const [subs, queueEntries] = await Promise.all([
           this.submissionStore.listLabSubmissionsAsync(lab.id),
           this.submissionStore.listLabReviewQueueAsync(lab.id, 'counted'),
@@ -176,7 +212,7 @@ export class ClassesService {
     );
     return {
       items: enrichedItems,
-      nextCursor: page.nextCursor,
+      nextCursor,
     };
   }
 
@@ -185,11 +221,12 @@ export class ClassesService {
     userId: string,
     role: UserRole,
     input: CreateLabInput,
+    idempotencyKey?: string,
   ): Promise<Lab> {
     if (role !== 'TA') {
       throw problemException(HttpStatus.FORBIDDEN, 'Only TAs may create labs.');
     }
-    return this.labsService.createLab(userId, { ...input, classId });
+    return this.labsService.createLab(userId, { ...input, classId }, idempotencyKey);
   }
 
   private async assertClassReadable(

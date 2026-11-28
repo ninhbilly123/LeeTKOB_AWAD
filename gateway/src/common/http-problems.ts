@@ -2,6 +2,14 @@ import { HttpException, HttpStatus } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UserRole } from '../submissions/submissions.types';
 
+export interface ValidationFieldError {
+  field: string;
+  message: string;
+}
+
+export const UUID_V4_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 const STATUS_META: Record<number, { title: string; slug: string }> = {
   400: { title: 'Bad Request', slug: 'bad-request' },
   401: { title: 'Unauthorized', slug: 'unauthorized' },
@@ -11,24 +19,27 @@ const STATUS_META: Record<number, { title: string; slug: string }> = {
   413: { title: 'Payload Too Large', slug: 'payload-too-large' },
   415: { title: 'Unsupported Media Type', slug: 'unsupported-media-type' },
   500: { title: 'Internal Server Error', slug: 'internal-server-error' },
+  503: { title: 'Service Unavailable', slug: 'service-unavailable' },
 };
 
 export function problemException(
   status: number,
   detail: string,
   slugOverride?: string,
+  errors?: ValidationFieldError[],
 ): HttpException {
   const meta = STATUS_META[status] ?? STATUS_META[500];
   const slug = slugOverride ?? meta.slug;
-  return new HttpException(
-    {
-      type: `https://leetkob.edu.vn/errors/${slug}`,
-      title: meta.title,
-      status,
-      detail,
-    },
+  const payload: Record<string, unknown> = {
+    type: `https://leetkob.edu.vn/errors/${slug}`,
+    title: meta.title,
     status,
-  );
+    detail,
+  };
+  if (errors && errors.length > 0) {
+    payload.errors = errors;
+  }
+  return new HttpException(payload, status);
 }
 
 export function assertJsonContentType(contentType: string | undefined): void {
@@ -38,6 +49,27 @@ export function assertJsonContentType(contentType: string | undefined): void {
       'Requests must use Content-Type: application/json.',
     );
   }
+}
+
+export function parseOptionalIdempotencyKey(rawKey: string | undefined): string | undefined {
+  if (rawKey === undefined) {
+    return undefined;
+  }
+  const trimmed = rawKey.trim();
+  if (!UUID_V4_REGEX.test(trimmed)) {
+    throw problemException(
+      HttpStatus.BAD_REQUEST,
+      "Header 'Idempotency-Key' must be a valid UUID v4 when provided.",
+      undefined,
+      [
+        {
+          field: 'Idempotency-Key',
+          message: "Header 'Idempotency-Key' must be a valid UUID v4 when provided.",
+        },
+      ],
+    );
+  }
+  return trimmed;
 }
 
 export interface VerifiedJwtUser {

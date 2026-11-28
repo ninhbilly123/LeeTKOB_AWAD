@@ -1,6 +1,9 @@
 import { Injectable, Optional } from '@nestjs/common';
-import { PostgresPersistence } from '../persistence/postgres.store';
+import { compareDescTimestampId, isAfterDescKeyset, KeysetCursor } from '../common/pagination';
+import { OptionalIdempotencyParams, PostgresPersistence } from '../persistence/postgres.store';
 import { Lab } from '../submissions/submissions.types';
+
+const DEFAULT_LAB_CREATED_AT = '2026-11-01T00:00:00.000Z';
 
 /** Dual-mode lab store: PostgreSQL when enabled, in-memory for offline tests. */
 @Injectable()
@@ -17,7 +20,13 @@ export class LabsStore {
 
   resetLabs(labs: Lab[] = []): void {
     this.labs.clear();
-    for (const lab of labs) this.labs.set(lab.id, { ...lab });
+    const baseMs = Date.parse(DEFAULT_LAB_CREATED_AT);
+    labs.forEach((lab, idx) => {
+      this.labs.set(lab.id, {
+        ...lab,
+        createdAt: lab.createdAt ?? new Date(baseMs + idx * 1000).toISOString(),
+      });
+    });
   }
 
   getLab(id: string): Lab | undefined {
@@ -25,15 +34,24 @@ export class LabsStore {
   }
 
   saveLab(lab: Lab): void {
+    const existing = this.labs.get(lab.id);
     this.labs.set(lab.id, {
       ...lab,
+      createdAt: lab.createdAt ?? existing?.createdAt ?? new Date().toISOString(),
       testCases: lab.testCases ? lab.testCases.map((tc) => ({ ...tc })) : undefined,
       constraints: lab.constraints ? lab.constraints.map((c) => ({ ...c })) : undefined,
     });
   }
 
   getAllLabs(): Lab[] {
-    return [...this.labs.values()];
+    return [...this.labs.values()].sort((a, b) =>
+      compareDescTimestampId(
+        a.createdAt ?? DEFAULT_LAB_CREATED_AT,
+        a.id,
+        b.createdAt ?? DEFAULT_LAB_CREATED_AT,
+        b.id,
+      ),
+    );
   }
 
   // --- Async dual-mode (Postgres or in-memory) ---
@@ -62,12 +80,16 @@ export class LabsStore {
     };
   }
 
-  async saveLabAsync(lab: Lab): Promise<void> {
+  async saveLabAsync(lab: Lab, idempotency?: OptionalIdempotencyParams): Promise<Lab> {
     if (this.usePostgres) {
-      await this.postgres!.saveLab(lab);
-      return;
+      return this.postgres!.saveLab(lab, idempotency);
     }
-    this.saveLab(lab);
+    const toStore: Lab = {
+      ...lab,
+      createdAt: lab.createdAt ?? this.labs.get(lab.id)?.createdAt ?? new Date().toISOString(),
+    };
+    this.saveLab(toStore);
+    return toStore;
   }
 
   async getAllLabsAsync(allowedClassIds?: string[] | null, studentOnly = false): Promise<Lab[]> {
@@ -87,5 +109,24 @@ export class LabsStore {
       ...lab,
       testCases: (lab.testCases ?? []).filter((tc) => !tc.isHidden),
     }));
+  }
+
+  /** Keyset-paginated class labs lookup returning up to limit + 1 records. */
+  async listClassLabsPageAsync(
+    classId: string,
+    studentOnly: boolean,
+    cursor: KeysetCursor | null,
+    limit: number,
+  ): Promise<Lab[]> {
+    if (this.usePostgres) {
+      return this.postgres!.listClassLabsPage(classId, studentOnly, cursor, limit);
+    }
+    const all = await this.getAllLabsAsync([classId], studentOnly);
+    const filtered = cursor
+      ? all.filter((lab) =>
+          isAfterDescKeyset(lab.createdAt ?? DEFAULT_LAB_CREATED_AT, lab.id, cursor),
+        )
+      : all;
+    return filtered.slice(0, limit + 1);
   }
 }

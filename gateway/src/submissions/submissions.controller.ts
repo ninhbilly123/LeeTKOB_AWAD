@@ -18,81 +18,101 @@ import { Response } from 'express';
 import { SubmissionsService, TaReviewDecisionPayload } from './submissions.service';
 import { ClassOwnershipGuard } from '../common/guards/class-ownership.guard';
 import { JwtAuthGuard, JwtAuthenticatedRequest } from '../common/guards/jwt-auth.guard';
-import { assertJsonContentType, problemException } from '../common/http-problems';
+import {
+  assertJsonContentType,
+  problemException,
+  UUID_V4_REGEX,
+  ValidationFieldError,
+} from '../common/http-problems';
 import { AuthenticatedRequest, EvidenceLine } from './submissions.types';
 
-const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
 function parseTaReviewDecisionPayload(body: Record<string, unknown>): TaReviewDecisionPayload {
-  if (!body || (body.decision !== 'PASS' && body.decision !== 'VIOLATION')) {
-    throw problemException(
-      HttpStatus.BAD_REQUEST,
-      "Field 'decision' is required and must be 'PASS' or 'VIOLATION'.",
-    );
+  const fieldErrors: ValidationFieldError[] = [];
+
+  const isDecisionValid =
+    Boolean(body) && (body.decision === 'PASS' || body.decision === 'VIOLATION');
+  if (!isDecisionValid) {
+    fieldErrors.push({
+      field: 'decision',
+      message: "Field 'decision' is required and must be 'PASS' or 'VIOLATION'.",
+    });
   }
 
   let deduction: number | undefined;
-  if (body.deduction !== undefined) {
+  if (body && body.deduction !== undefined) {
     if (
       typeof body.deduction !== 'number' ||
       !Number.isFinite(body.deduction) ||
       body.deduction < 0 ||
       body.deduction > 10
     ) {
-      throw problemException(
-        HttpStatus.BAD_REQUEST,
-        "Field 'deduction' must be a finite number between 0 and 10.",
-      );
+      fieldErrors.push({
+        field: 'deduction',
+        message: "Field 'deduction' must be a finite number between 0 and 10.",
+      });
+    } else {
+      deduction = body.deduction;
     }
-    deduction = body.deduction;
   }
 
   let evidence: EvidenceLine[] | undefined;
-  if (body.evidence !== undefined) {
+  if (body && body.evidence !== undefined) {
     if (!Array.isArray(body.evidence)) {
-      throw problemException(
-        HttpStatus.BAD_REQUEST,
-        "Field 'evidence' must be an array of { line, text } objects.",
-      );
+      fieldErrors.push({
+        field: 'evidence',
+        message: "Field 'evidence' must be an array of { line, text } objects.",
+      });
+    } else {
+      const parsedEvidence: EvidenceLine[] = [];
+      body.evidence.forEach((raw, idx) => {
+        const item = raw as Record<string, unknown>;
+        if (
+          !item ||
+          typeof item.line !== 'number' ||
+          !Number.isInteger(item.line) ||
+          item.line < 1 ||
+          typeof item.text !== 'string' ||
+          item.text.trim().length === 0
+        ) {
+          fieldErrors.push({
+            field: `evidence[${idx}]`,
+            message: 'Each evidence item must contain integer line >= 1 and non-empty text.',
+          });
+        } else {
+          parsedEvidence.push({ line: item.line, text: item.text });
+        }
+      });
+      evidence = parsedEvidence;
     }
-    evidence = body.evidence.map((raw) => {
-      const item = raw as Record<string, unknown>;
-      if (
-        !item ||
-        typeof item.line !== 'number' ||
-        !Number.isInteger(item.line) ||
-        item.line < 1 ||
-        typeof item.text !== 'string' ||
-        item.text.trim().length === 0
-      ) {
-        throw problemException(
-          HttpStatus.BAD_REQUEST,
-          'Each evidence item must contain integer line >= 1 and non-empty text.',
-        );
-      }
-      return { line: item.line, text: item.text };
+  }
+
+  if (body && body.decision === 'VIOLATION' && (!evidence || evidence.length === 0)) {
+    fieldErrors.push({
+      field: 'evidence',
+      message: 'Selecting VIOLATION requires at least one evidence line (FAQ-09).',
     });
   }
 
-  if (body.decision === 'VIOLATION' && (!evidence || evidence.length === 0)) {
-    throw problemException(
-      HttpStatus.BAD_REQUEST,
-      'Selecting VIOLATION requires at least one evidence line (FAQ-09).',
-    );
-  }
-
   let reason: string | null | undefined;
-  if (body.reason !== undefined && body.reason !== null) {
+  if (body && body.reason !== undefined && body.reason !== null) {
     if (typeof body.reason !== 'string') {
-      throw problemException(HttpStatus.BAD_REQUEST, "Field 'reason' must be a string or null.");
+      fieldErrors.push({
+        field: 'reason',
+        message: "Field 'reason' must be a string or null.",
+      });
+    } else {
+      reason = body.reason;
     }
-    reason = body.reason;
-  } else if (body.reason === null) {
+  } else if (body && body.reason === null) {
     reason = null;
   }
 
+  if (fieldErrors.length > 0) {
+    throw problemException(HttpStatus.BAD_REQUEST, fieldErrors[0].message, undefined, fieldErrors);
+  }
+
   return {
-    decision: body.decision,
+    decision: body.decision as 'PASS' | 'VIOLATION',
     deduction,
     evidence,
     reason,
@@ -183,8 +203,19 @@ export class SubmissionsController {
 
   @Get(':labId/submissions')
   @UseGuards(JwtAuthGuard)
-  async listSubmissions(@Param('labId') labId: string, @Req() req: JwtAuthenticatedRequest) {
-    return this.submissionsService.listSubmissionsForUser(labId, req.user.id, req.user.role);
+  async listSubmissions(
+    @Param('labId') labId: string,
+    @Req() req: JwtAuthenticatedRequest,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.submissionsService.listSubmissionsForUser(
+      labId,
+      req.user.id,
+      req.user.role,
+      cursor,
+      limit,
+    );
   }
 
   @Get(':labId/review-queue')
@@ -193,6 +224,8 @@ export class SubmissionsController {
     @Param('labId') labId: string,
     @Query('scope') rawScope: string | undefined,
     @Req() req: JwtAuthenticatedRequest,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
   ) {
     if (rawScope !== undefined && rawScope !== 'counted' && rawScope !== 'all') {
       throw problemException(
@@ -201,7 +234,14 @@ export class SubmissionsController {
       );
     }
     const scope = rawScope === 'all' ? 'all' : 'counted';
-    return this.submissionsService.getReviewQueueForTa(labId, req.user.id, req.user.role, scope);
+    return this.submissionsService.getReviewQueueForTa(
+      labId,
+      req.user.id,
+      req.user.role,
+      scope,
+      cursor,
+      limit,
+    );
   }
 
   @Get(':labId/submissions/:submissionId/review')

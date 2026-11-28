@@ -1,16 +1,18 @@
 # API Contract: Submit Code for a Lab
 
-- **Endpoint:** `POST /labs/{labId}/submissions`
+- **Endpoint (Baseline & `/v1` Alias):** `POST /labs/{labId}/submissions` (`POST /v1/labs/{labId}/submissions`)
 - **Referenced FAQs & Contracts:** [FAQ-01](../proposal/FAQ.md#faq-01), [FAQ-02](../proposal/FAQ.md#faq-02), [FAQ-03](../proposal/FAQ.md#faq-03), [FAQ-05](../proposal/FAQ.md#faq-05), [auth-and-labs.md](auth-and-labs.md), [queue-and-judge.md](queue-and-judge.md), [reviews-and-results.md](reviews-and-results.md).
 
 ---
 
 ## 1. Conventions
 
-### 1.1 Media Types, Time, Units & Unknown Fields
+### 1.1 Media Types, Identifiers, Time, Units & Unknown Fields
 - **Request `Content-Type`:** `application/json` (required; otherwise `415 Unsupported Media Type`).
 - **Success `Content-Type`:** `application/json`.
 - **Error `Content-Type`:** `application/problem+json` ([RFC 9457](https://datatracker.ietf.org/doc/html/rfc9457)).
+- **Path Versioning:** Served identically at `/labs/{labId}/submissions` and `/v1/labs/{labId}/submissions`; RFC 9457 `instance` reflects the requested URL path.
+- **Identifiers:** Opaque prefixed strings — submissions (`sub_<uuid>`), labs (`lab_<uuid|slug>`), students (`std_<id>` or `usr_<slug>`).
 - **Timestamps:** ISO 8601 UTC strings. The deadline is compared against the **server receipt timestamp** captured *before* body parsing (`FAQ-03`).
 - **Payload Limits (`FAQ-05`):**
   - Decoded C++17 `code`: minimum 1 non-whitespace character, maximum **65,536 bytes (64 KiB UTF-8)**.
@@ -36,19 +38,22 @@
 
 ## 2. Errors
 
-Every error response returns `Content-Type: application/problem+json` with required RFC 9457 members `type`, `title`, `status`, `detail`, and `instance`. Clients branch on `type`, never on `detail`.
+Every error response returns `Content-Type: application/problem+json` with required RFC 9457 members `type`, `title`, `status`, `detail`, and `instance`. Clients branch on `type`, never on `title` or `detail`.
 
-| Status | `type` URI | `title` | Triggering Conditions |
-|:---:|---|---|---|
-| `400` | `https://leetkob.edu.vn/errors/bad-request` | `Bad Request` | Malformed JSON; missing or non-UUID-v4 `Idempotency-Key`; missing, empty, or whitespace-only `code`; decoded UTF-8 `code` > 65,536 bytes. |
-| `401` | `https://leetkob.edu.vn/errors/unauthorized` | `Unauthorized` | Missing, malformed, invalid-signature, or expired Bearer JWT. |
-| `403` | `https://leetkob.edu.vn/errors/forbidden` | `Forbidden` | Caller is `TA`/`ADMIN`, or `STUDENT` is not actively enrolled in the class owning `labId`. |
-| `404` | `https://leetkob.edu.vn/errors/not-found` | `Not Found` | Target `labId` does not exist. |
-| `409` | `https://leetkob.edu.vn/errors/deadline-passed` | `Conflict` | Server receipt timestamp is at or after `lab.deadline` (`FAQ-03`). |
-| `409` | `https://leetkob.edu.vn/errors/idempotency-conflict` | `Conflict` | `Idempotency-Key` was previously used by this student with a different `code` or a different `labId` (Verified Incident 2026-11-11). |
-| `413` | `https://leetkob.edu.vn/errors/payload-too-large` | `Payload Too Large` | Raw JSON HTTP body exceeds 512 KiB transport limit. |
-| `415` | `https://leetkob.edu.vn/errors/unsupported-media-type` | `Unsupported Media Type` | Missing or non-`application/json` `Content-Type` header. |
-| `500` | `https://leetkob.edu.vn/errors/internal-server-error` | `Internal Server Error` | Unexpected server/database failure (fixed safe message; never leaks SQL, paths, or stack traces). |
+- **Field Validation Reporting:** This endpoint validates one header (`Idempotency-Key`) and one body field (`code`). To preserve 100% compatibility with published PA#2 clients and contract tests, `400 Bad Request` responses identify the offending header or field directly in `detail` using the exact 5-member RFC 9457 body (`type`, `title`, `status`, `detail`, `instance`).
+- **Internal Server Errors (`500`):** Never expose SQL errors, table/column names, paths, or stack traces. The server returns the fixed safe `detail` below, emits an `X-Request-Id` response header, and logs the internal stack trace keyed by that `requestId`.
+
+| Status | `type` URI | `title` | Triggering Conditions | Headers |
+|:---:|---|---|---|---|
+| `400` | `https://leetkob.edu.vn/errors/bad-request` | `Bad Request` | Malformed JSON; missing or non-UUID-v4 `Idempotency-Key`; missing, empty, or whitespace-only `code`; decoded UTF-8 `code` > 65,536 bytes. | — |
+| `401` | `https://leetkob.edu.vn/errors/unauthorized` | `Unauthorized` | Missing, malformed, invalid-signature, or expired Bearer JWT. | — |
+| `403` | `https://leetkob.edu.vn/errors/forbidden` | `Forbidden` | Caller is `TA`/`ADMIN`, or `STUDENT` is not actively enrolled in the class owning `labId`. | — |
+| `404` | `https://leetkob.edu.vn/errors/not-found` | `Not Found` | Target `labId` does not exist. | — |
+| `409` | `https://leetkob.edu.vn/errors/deadline-passed` | `Conflict` | Server receipt timestamp is at or after `lab.deadline` (`FAQ-03`). | — |
+| `409` | `https://leetkob.edu.vn/errors/idempotency-conflict` | `Conflict` | `Idempotency-Key` was previously used by this student with a different `code` or a different `labId` (Verified Incident 2026-11-11). | — |
+| `413` | `https://leetkob.edu.vn/errors/payload-too-large` | `Payload Too Large` | Raw JSON HTTP body exceeds 512 KiB transport limit. | — |
+| `415` | `https://leetkob.edu.vn/errors/unsupported-media-type` | `Unsupported Media Type` | Missing or non-`application/json` `Content-Type` header. | — |
+| `500` | `https://leetkob.edu.vn/errors/internal-server-error` | `Internal Server Error` | Unexpected server/database failure (fixed safe message; stack logged internally with `requestId`). | `X-Request-Id` |
 
 ### Example Problem Responses (`application/problem+json`)
 - **409 Deadline Passed:**
@@ -97,7 +102,16 @@ Every error response returns `Content-Type: application/problem+json` with requi
   "idempotencyKey": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
 }
 ```
-- `status`: `"QUEUED"` upon acceptance (pipeline status transitions to `JUDGING` → `COMPLETED` or `JUDGE_ERROR` asynchronously via the judge worker).
+
+| Field | Type | Nullable | Rules |
+|---|---|:---:|---|
+| `id` | `string` | No | Opaque submission ID (`sub_<uuid>`). |
+| `labId` | `string` | No | Target lab ID. |
+| `studentId` | `string` | No | Authenticated submitting student ID (`req.user.id`). |
+| `submittedAt` | `string (ISO 8601)` | No | Server receipt UTC timestamp captured before body parsing (`FAQ-03`). |
+| `status` | `"QUEUED"` | No | Initial pipeline status upon acceptance (transitions asynchronously to `JUDGING` → `COMPLETED` or `JUDGE_ERROR`). |
+| `idempotencyKey` | `string (UUID v4)` | No | Exact `Idempotency-Key` echoed back to client. |
+
 - **Omitted fields:** `code`, hidden test inputs/outputs, and constraint checker findings are never returned on submission creation (`FAQ-02`, `FAQ-08`).
 
 ---
@@ -125,9 +139,9 @@ Every error response returns `Content-Type: application/problem+json` with requi
 
 #### Validation Order & Failure Persistence
 1. Body parser rejects malformed JSON (`400`) or raw body > 512 KiB (`413`) before guards run.
-2. `ClassOwnershipGuard` verifies JWT (`401`), `STUDENT` role (`403`), lab existence (`404`), and active class enrollment (`403`).
+2. `ClassOwnershipGuard` verifies JWT (`401`), `STUDENT` role (`403`), and active class enrollment when the lab exists (`403`).
 3. Controller validates `Content-Type` (`415`), `Idempotency-Key` UUID v4 format (`400`), and `code` non-empty & ≤ 64 KiB (`400`).
-4. Service performs atomic idempotency lookup, deadline check (`receivedAt >= deadline` → `409 deadline-passed`), and submission + outbox persistence.
+4. Service performs atomic idempotency lookup (`201` replay / `409 idempotency-conflict`), lab existence check (`404`), deadline check (`receivedAt >= deadline` → `409 deadline-passed`), and submission + outbox persistence.
 5. On any `4xx` or `5xx` failure, **no submission, no queue job, and no idempotency record is persisted**.
 
 #### Success Response (`201 Created`)
@@ -149,6 +163,7 @@ Every error response returns `Content-Type: application/problem+json` with requi
 
 ## 5. Versions and the Legacy API
 
-1. **Compatible (Non-Breaking) Additions:** Adding optional request fields (e.g. `compilerFlags?: string[]`) or additive informational response fields without altering required keys, error URIs, or the 64 KiB decoded code / 512 KiB transport limits.
-2. **Breaking Changes:** Changing required request fields, lowering the 64 KiB limit, changing idempotency scoping/conflict semantics, or modifying RFC 9457 error `type` URIs requires path versioning (`POST /v2/labs/{labId}/submissions`).
-3. **Deprecation Policy:** Deprecated versions remain operational for a minimum grace period of **6 months** while emitting `Deprecation` (RFC 9745), `Sunset` (RFC 8594), and `Link: </v2/labs/{labId}/submissions>; rel="successor-version"` headers.
+1. **Active Path Versioning (`/v1` & Baseline Alias):** `POST /v1/labs/{labId}/submissions` and `POST /labs/{labId}/submissions` execute the exact same handler and idempotency semantics.
+2. **Compatible (Non-Breaking) Additions:** Adding optional request fields (e.g. `compilerFlags?: string[]`), optional response headers (`X-Request-Id`), or additive informational response fields without altering required keys, error URIs, or the 64 KiB decoded code / 512 KiB transport limits. Clients MUST ignore unknown JSON fields.
+3. **Breaking Changes:** Changing required request fields, lowering the 64 KiB limit, changing idempotency scoping/conflict semantics, or modifying RFC 9457 error `type` URIs requires path versioning (`POST /v2/labs/{labId}/submissions`).
+4. **Deprecation Policy:** Deprecated versions remain operational for a minimum grace period of **6 months** while emitting `Deprecation` (RFC 9745), `Sunset` (RFC 8594), and `Link: </v2/labs/{labId}/submissions>; rel="successor-version"` headers.

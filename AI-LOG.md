@@ -660,3 +660,23 @@ Team Members:
   - Modifying or relaxing any existing contract test assertion across `gateway/test/*.spec.ts` or `checker/tests/test_server.py`.
 - **Validation**:
   - Ran all four canonical root quality gates + Gateway e2e: `npm run lint` (PASSED), `npm run format:check` (PASSED), `npm run typecheck` (PASSED — TS + `mypy` 16 files), `npm run test` (**162/162 passed**: Gateway Jest 10 suites / 98 tests, Web Vitest 2 suites / 11 tests, Judge Jest 4 suites / 19 tests, Checker Pytest 34 tests), and `npm run test:e2e --workspace=gateway` (1/1 passed).
+
+---
+
+## 2026-11-28 — Align All API Contracts & Gateway Implementation with `write-api-contract` & `engineering-rules.md` (Phạm An Ninh)
+
+- **Tool**: Antigravity.
+- **Asked for**: Audit all 5 files in `docs/contract/` and all 19 implemented API endpoints (`gateway/` + `checker/`) against `.agents/skills/write-api-contract/SKILL.md` and `docs/engineering-rules.md`, resolve caller-visible design choices, and execute an end-to-end alignment plan on branch `feat/align-api-engineering-rules` without modifying or weakening any existing test.
+- **Kept**:
+  - Updated 4 contracts first (Contract First): `docs/contract/auth-and-labs.md`, `docs/contract/post-submissions.md`, `docs/contract/reviews-and-results.md`, and `docs/contract/queue-and-judge.md` (aligned `500` URI to `internal-server-error`, added `413 Payload Too Large`, identifier conventions, complete Section 3 resource field tables including `ConstraintFindingRecord` and full `LabStudentView`, validation precedence, keyset pagination specs, optional `Idempotency-Key` rules, `/v1/*` alias policy, and complete `POST /check` internal spec).
+  - Replaced disguised `OFFSET` cursor pagination (`{"offset": N}`) with true **keyset cursor pagination** (`gateway/src/common/pagination.ts`, `PostgresPersistence`, and in-memory stores) across `GET /classes`, `GET /classes/:classId/labs`, `GET /labs/:labId/submissions`, and `GET /labs/:labId/review-queue` with scope binding (`400` on cross-endpoint/filter cursor replay), SQL `(created_at, id) < ($t, $id)` / `(submitted_at, id) < ($t, $id)` + `LIMIT limit + 1`, and lab-wide `pendingReviewCount`.
+  - Fixed `Rfc9457ExceptionFilter` (`gateway/src/common/filters/rfc9457-exception.filter.ts`) and `http-problems.ts`: preserved exact `503 Service Unavailable` detail (`Database connectivity check failed.`), preserved optional `errors[]` field-validation arrays on multi-field DTOs (`POST /auth/login`, `POST /classes`, `POST /classes/:id/labs`, `POST /labs`, `PATCH .../findings/:id`), and added `X-Request-Id` header + internal stack logging on `500` without leaking internals in response body.
+  - Added `/v1/*` path-versioning alias middleware in `gateway/src/configure-app.ts` preserving `request.originalUrl` for accurate RFC 9457 `instance` values and exposing `X-Request-Id` in CORS.
+  - Updated `gateway/migrations/0001_init_pa3_schema.up.sql` (`idempotency_records.lab_id TEXT NULL`, `uniq_classes_code_lower`, `idx_classes_cursor`), implemented atomic `LOWER(code)` lock + Postgres `23505` → `409 Conflict` mapping in `PostgresPersistence.createClass`, and added optional DB-backed `Idempotency-Key` (UUID v4, 24h TTL, single transaction) to `POST /classes`, `POST /classes/:id/labs`, and `POST /labs`.
+  - Added `gateway/test/engineering-rules-alignment.contract.spec.ts` (`AC1`–`AC4`) covering tied-timestamp keyset pagination, mid-traversal inserts, cross-scope cursor rejection, multi-field `errors[]`, `503`/`500` `X-Request-Id` logging, `/v1/*` routing, optional `Idempotency-Key`, and PostgreSQL SQL/23505 verification.
+- **Changed**:
+  - Kept `POST /labs/:labId/submissions` single-field `400` body strictly 5-key (`{ type, title, status, detail, instance }`) and updated `0001_init_pa3_schema.up.sql` directly rather than adding a `0002` migration file so 100% of existing PA#2/PA#3 contract and migration tests (`submissions.contract.spec.ts`, `database-hardening.spec.ts`) remain untouched and green.
+- **Rejected**:
+  - Keeping Base64URL-encoded `{"offset": N}` pagination or editing existing test assertions to accommodate schema/response changes.
+- **Validation**:
+  - Ran all four canonical root quality gates + Gateway e2e + all 3 TS workspace builds: `npm run lint` (PASSED), `npm run format:check` (PASSED), `npm run typecheck` (PASSED — TS + `mypy` 16 files), `npm run test` (**166/166 passed**: Gateway Jest 11 suites / 102 tests, Web Vitest 2 suites / 11 tests, Judge Jest 4 suites / 19 tests, Checker Pytest 34 tests), `npm run test:e2e --workspace=gateway` (1/1), and `npm run build` for `gateway`, `web`, and `judge` (all PASSED).

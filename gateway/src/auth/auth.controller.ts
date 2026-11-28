@@ -10,7 +10,11 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard, JwtAuthenticatedRequest } from '../common/guards/jwt-auth.guard';
-import { assertJsonContentType, problemException } from '../common/http-problems';
+import {
+  assertJsonContentType,
+  problemException,
+  ValidationFieldError,
+} from '../common/http-problems';
 import { UserProfile } from '../submissions/submissions.types';
 import { AuthService, LoginResponse } from './auth.service';
 
@@ -33,19 +37,30 @@ export class AuthController {
           ? body.email.trim()
           : '';
 
-    if (
-      !body ||
-      rawIdentifier.length === 0 ||
-      typeof body.password !== 'string' ||
-      body.password.length === 0
-    ) {
+    const fieldErrors: ValidationFieldError[] = [];
+    if (!body || rawIdentifier.length === 0) {
+      fieldErrors.push({
+        field: 'username',
+        message: 'Field username (or email) must be a non-empty string.',
+      });
+    }
+    if (!body || typeof body.password !== 'string' || body.password.length === 0) {
+      fieldErrors.push({
+        field: 'password',
+        message: 'Field password must be a non-empty string.',
+      });
+    }
+
+    if (fieldErrors.length > 0) {
       throw problemException(
         HttpStatus.BAD_REQUEST,
         'Both username (or email) and password must be non-empty strings.',
+        undefined,
+        fieldErrors,
       );
     }
 
-    return this.authService.login(rawIdentifier, body.password);
+    return this.authService.login(rawIdentifier, body.password as string);
   }
 
   @Get('me')

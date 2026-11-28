@@ -90,6 +90,7 @@ export interface Lab {
   publishedAt?: string | null;
   isPublished?: boolean;
   createdBy?: string | null;
+  createdAt?: string;
 }
 
 export interface ClassMembership {
@@ -282,14 +283,14 @@ export interface TaReviewQueueEntry {
   findings: ConstraintFindingRecord[];
 }
 
-export interface IdempotencyRecord {
+export interface IdempotencyRecord<TBody = SubmissionResponse> {
   key: string;
   studentId: string;
-  labId: string;
+  labId: string | null;
   payloadHash: string; // SHA-256 hex string
   statusCode: number;
   responseHeaders: Record<string, string>;
-  responseBody: SubmissionResponse;
+  responseBody: TBody;
   createdAt: string;
   expiresAt: string;
 }

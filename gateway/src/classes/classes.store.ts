@@ -1,6 +1,8 @@
-import { Injectable, Optional } from '@nestjs/common';
+import { HttpStatus, Injectable, Optional } from '@nestjs/common';
 import { DEMO_CLASSES, DEMO_ENROLLMENTS, DEMO_STAFF } from '../auth/password.util';
-import { PostgresPersistence } from '../persistence/postgres.store';
+import { problemException } from '../common/http-problems';
+import { compareDescTimestampId, isAfterDescKeyset, KeysetCursor } from '../common/pagination';
+import { OptionalIdempotencyParams, PostgresPersistence } from '../persistence/postgres.store';
 import { ClassRecord, UserRole } from '../submissions/submissions.types';
 
 export interface ClassSummaryRecord extends ClassRecord {
@@ -55,8 +57,8 @@ export class ClassesStore {
       return this.postgres!.listClassSummariesForUser(userId, role);
     }
 
-    const all = [...this.classes.values()].sort(
-      (a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id),
+    const all = [...this.classes.values()].sort((a, b) =>
+      compareDescTimestampId(a.createdAt, a.id, b.createdAt, b.id),
     );
     if (role === 'ADMIN') {
       return all.map((c) => ({ ...c, taIds: [...c.taIds] }));
@@ -76,20 +78,45 @@ export class ClassesStore {
       .map((c) => ({ ...c, taIds: [...c.taIds] }));
   }
 
-  async createClassAsync(record: ClassSummaryRecord): Promise<ClassSummaryRecord> {
+  /** Keyset-paginated class summary lookup returning up to limit + 1 records. */
+  async listClassesPageForUserAsync(
+    userId: string,
+    role: UserRole,
+    cursor: KeysetCursor | null,
+    limit: number,
+  ): Promise<ClassSummaryRecord[]> {
     if (this.usePostgres) {
-      await this.postgres!.createClass(
+      return this.postgres!.listClassSummariesPageForUser(userId, role, cursor, limit);
+    }
+    const all = await this.listClassesForUserAsync(userId, role);
+    const filtered = cursor
+      ? all.filter((item) => isAfterDescKeyset(item.createdAt, item.id, cursor))
+      : all;
+    return filtered.slice(0, limit + 1);
+  }
+
+  async createClassAsync(
+    record: ClassSummaryRecord,
+    idempotency?: OptionalIdempotencyParams,
+  ): Promise<ClassSummaryRecord> {
+    if (this.usePostgres) {
+      const stored = await this.postgres!.createClass(
         {
-          id: record.id,
-          code: record.code,
-          name: record.name,
-          term: record.term,
+          ...record,
           inviteCode: record.inviteCode ?? null,
-          createdBy: record.createdBy,
+          taIds: [...record.taIds],
         },
         record.taIds,
+        idempotency,
       );
-      return { ...record, taIds: [...record.taIds] };
+      return { ...stored, taIds: [...stored.taIds] };
+    }
+
+    const exists = [...this.classes.values()].some(
+      (c) => c.code.toLowerCase() === record.code.toLowerCase(),
+    );
+    if (exists) {
+      throw problemException(HttpStatus.CONFLICT, `Class code '${record.code}' already exists.`);
     }
     const stored: ClassSummaryRecord = { ...record, taIds: [...record.taIds] };
     this.classes.set(stored.id, stored);

@@ -160,11 +160,11 @@ CREATE TABLE IF NOT EXISTS submission_jobs (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Scoped per student with lab_id FK and lab-included payload_hash per AGENTS.md §4.2
--- and gateway/test/submission-boundaries.contract.spec.ts (cross-lab key reuse -> 409).
+-- Scoped per actor (student, TA, or admin) with optional lab_id FK and route/lab-included
+-- payload_hash per AGENTS.md §4.2, docs/engineering-rules.md §3, and contract suites.
 CREATE TABLE IF NOT EXISTS idempotency_records (
   student_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  lab_id TEXT NOT NULL REFERENCES labs(id) ON DELETE CASCADE,
+  lab_id TEXT NULL REFERENCES labs(id) ON DELETE CASCADE,
   idempotency_key UUID NOT NULL,
   payload_hash TEXT NOT NULL,
   status_code INTEGER NOT NULL CHECK (status_code BETWEEN 200 AND 299),
@@ -287,6 +287,12 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 );
 
 -- Query-driven indexes (equality filters first, range/sort columns last; partial indexes where hot)
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_classes_code_lower
+  ON classes (LOWER(code));
+
+CREATE INDEX IF NOT EXISTS idx_classes_cursor
+  ON classes (created_at DESC, id DESC);
+
 CREATE INDEX IF NOT EXISTS idx_class_staff_ta
   ON class_staff (ta_id, class_id);
 

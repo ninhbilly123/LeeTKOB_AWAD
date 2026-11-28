@@ -119,6 +119,7 @@ export function mapLabRow(
     publishedAt,
     isPublished: publishedAt !== null,
     createdBy: row.created_by ? String(row.created_by) : null,
+    createdAt: row.created_at ? toIsoString(row.created_at) : undefined,
   };
 }
 

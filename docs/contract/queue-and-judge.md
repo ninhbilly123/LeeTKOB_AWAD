@@ -87,7 +87,10 @@ LeeTKOB uses the normalized `submission_jobs` table as a transactional outbox an
   ```
 
 ### 4.2 `POST /check`
-- **Request (`application/json`):**
+- **Transport Limits & Headers:**
+  - `Content-Length` header MUST be a valid integer in `[1, 1048576]` (**1 MiB** `MAX_REQUEST_BYTES` safety cap); otherwise returns `400 Bad Request`.
+  - Request and response `Content-Type`: `application/json; charset=utf-8`.
+- **Request Body (`application/json`):**
   ```json
   {
     "submissionId": "sub_123",
@@ -98,9 +101,21 @@ LeeTKOB uses the normalized `submission_jobs` table as a transactional outbox an
       { "id": "C2", "text": "Use merge sort." }
     ],
     "studentIdentifiers": ["std_23120244", "student1", "student1@leetkob.edu.vn", "Student One"],
-    "costCapExceeded": false
+    "costCapExceeded": false,
+    "timeoutSeconds": 15,
+    "model": "gemini-3.1-flash-lite-preview"
   }
   ```
+  | Field | Type | Required | Rules & Defaults |
+  |---|---|:---:|---|
+  | `submissionId` | `string` | **Yes** | Non-empty trimmed string. |
+  | `sourceCode` | `string` | **Yes** | Non-empty C++17 source code. |
+  | `statement` | `string` | No | Problem Markdown statement (default `""`). |
+  | `constraints` | `Array<{ id: string; text: string }>` | **Yes** | Array of constraint objects; each requires non-empty `id` and `text`. |
+  | `studentIdentifiers` | `string[]` | No | Identifiers to scrub before prompting (default `[]`). |
+  | `costCapExceeded` | `boolean` | No | When `true`, skips LLM calls and emits `unsure` (`COST_CAP_EXCEEDED`; default `false`). |
+  | `timeoutSeconds` | `number` | No | Strictly positive timeout in seconds (`> 0`; default `15`). |
+  | `model` | `string \| null` | No | Optional model override; non-empty string when provided, else `GEMINI_MODEL` env default. |
 - **Response (`200 OK`, `application/json`):** Exact `CheckerResult` schema from [checker-output.md](checker-output.md):
   ```json
   {
@@ -121,8 +136,13 @@ LeeTKOB uses the normalized `submission_jobs` table as a transactional outbox an
     "callLogs": []
   }
   ```
-- **Validation Error (`400 Bad Request`):** Missing/invalid JSON or required fields (`submissionId`, `sourceCode`, `constraints`).
-- **Fail-Safe Guardrail in Worker:** If `POST /check` times out or returns HTTP 5xx / invalid JSON, the worker degrades every constraint safely to `verdict: "unsure"` (`unsureReason: "TIMEOUT"` or `"PROVIDER_ERROR"`) instead of dropping the submission or inventing a deduction (`FAQ-09`, Syllabus Rule).
+- **Error Responses (Internal Service Schema):**
+  - `400 Bad Request` (`{"error": "<validation message>"}`): Missing/invalid `Content-Length`, body > 1 MiB, invalid UTF-8/JSON, or missing/invalid request field.
+  - `404 Not Found` (`{"error": "Not Found"}`): Unknown `GET` or `POST` path on the internal server.
+- **Compatibility, Retry & Fail-Safe Guardrail in Worker:**
+  - Unknown extra JSON properties on `POST /check` are ignored by `parse_check_request()`, allowing additive producer updates without lockstep deploys.
+  - `POST /check` is stateless and side-effect-free on the checker side; worker retries on transient failures are safely deduplicated on persistence via `UNIQUE (submission_id, constraint_id)` and `UNIQUE (submission_id, call_ordinal)` (Section 5).
+  - If `POST /check` times out or returns HTTP 5xx / invalid JSON, the worker degrades every constraint safely to `verdict: "unsure"` (`unsureReason: "TIMEOUT"` or `"PROVIDER_ERROR"`) instead of dropping the submission or inventing a deduction (`FAQ-09`, Syllabus Rule).
 
 ---
 
