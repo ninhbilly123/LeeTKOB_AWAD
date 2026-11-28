@@ -446,3 +446,11 @@ Team Members:
   - Weakening `CHECK (status <> 'OK' OR btrim(request_id) <> '')` to drop `request_id` enforcement on `OK` calls (PA#3 Criterion 4 still requires real provider request IDs for every successful model call).
 - **Validation**:
   - Ran all four canonical quality gates plus Gateway e2e and NestJS build offline: `npm run lint` (0 errors/warnings across Gateway, Web, Checker), `npm run format:check` (all clean), `npm run typecheck` (`tsc --noEmit` + `mypy` 13 files clean), `npm run test` (Gateway Jest 7 suites / 82 tests, Web Vitest 2 suites / 8 tests, Checker Pytest 26 tests = 116 passed), `npm run test:e2e --workspace=gateway` (1/1 passed), and `npm run build --workspace=gateway` (exit 0).
+## 2026-11-28 — Add a skill for writing API contracts and contract tests
+
+- **Tool**: Codex.
+- **Asked for**: Combine the IA#3 CONTRACT.md, the applicable rubric, and LeeTKOB engineering rules into a reusable skill and require it in AGENTS.md.
+- **Kept**: The LeeTKOB submission contract's own authorization and replay behavior.
+- **Changed**: Added the five-section HTTP outline, a separate path for internal payloads, and a test workflow that checks both responses and persisted outcomes. Registered the skill in the repo catalog and AGENTS.md.
+- **Rejected**: Copying the IA#3 menu service's status codes and replay headers into LeeTKOB. These details belong to each endpoint's approved contract.
+- **Validation**: The skill-creator validator passed. Verified the five IA#3 sections, ten links, and the submission examples against the existing contract and test sources. Application tests were skipped for this documentation-only change.

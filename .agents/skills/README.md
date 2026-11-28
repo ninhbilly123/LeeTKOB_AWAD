@@ -9,6 +9,8 @@ Each skill lives in its own folder under `.agents/skills/<skill-name>/`:
 ```text
 .agents/skills/
 ├── README.md
+├── write-api-contract/
+│   └── SKILL.md
 ├── feature-workflow/
 │   └── SKILL.md
 ├── post-task-handover/
@@ -31,6 +33,7 @@ Optional subdirectories per skill (add only when needed):
 
 | Skill | Purpose | When to Use |
 |---|---|---|
+| [`write-api-contract`](./write-api-contract/SKILL.md) | IA#3 endpoint contract format and tests derived from the contract | Writing or updating an API contract or contract test |
 | [`feature-workflow`](./feature-workflow/SKILL.md) | End-to-end 7-stage feature lifecycle (scope, branch, contract, tests-first, implement, handover, PR) | Starting any new feature or milestone task (`D1–D3`, `N1–N3`, `K1–K3`) |
 | [`post-task-handover`](./post-task-handover/SKILL.md) | Run gates, audit diff, update `AI-LOG.md`, log to Google Sheet, confirm git/PR | Immediately after completing any task |
 | [`checker-eval-runner`](./checker-eval-runner/SKILL.md) | Verify dev-set SHA-256, anti-overfit scan, offline `MODEL_OFF=1` run, real-run artifacts | When editing `checker/`, prompts, hard rules, or eval datasets |

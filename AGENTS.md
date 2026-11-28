@@ -26,6 +26,7 @@ Every check must be runnable via one exact command, identical locally and in CI:
 - **Monorepo**: Multi-service repository. All checks are orchestrated from the root scripts.
 - **Config & Data**: Validate env config once at startup (fail loudly on missing secrets, no fallback defaults); enforce invariants in DB schema (`NOT NULL`, `UNIQUE`, `CHECK`, `FK`); never hold DB transactions across network/LLM calls; use expand-migrate-contract for schema changes.
 - **API & Auth**: Contract first (`docs/contract/`). All errors use **RFC 9457** (`application/problem+json`, never leaking SQL/stack traces on `500`). Enforce both role and resource ownership on the server (no IDOR). Use cursor pagination for lists and DB-backed `Idempotency-Key` for `POST`/`PATCH` writes.
+- **Contract authoring**: Before writing or updating any API contract or contract test, read and follow the [`write-api-contract` skill](.agents/skills/write-api-contract/SKILL.md).
 - **Cross-Service Sync & FAQ Privacy**:
   - Define shared internal schemas (`Gateway ↔ Queue/Judge ↔ Checker`, including `unsureReason` per `FAQ-09`) in `docs/contract/` before parallel coding; changes are Tier 2 (Ask First).
   - Enforce the PA#3 Syllabus Rule & FAQ boundaries: before Publish, student APIs return only `overallVerdict` and `testVerdicts[]` (hide test I/O per `FAQ-02`, hide checker verdicts/evidence/deductions per `FAQ-08`). Checker verdicts land only in the TA review queue (`PENDING_REVIEW`) and always enforce both schema validation and timeout. Cite FAQ IDs in code/contracts.
