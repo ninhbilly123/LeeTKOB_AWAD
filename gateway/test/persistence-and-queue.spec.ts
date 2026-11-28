@@ -300,6 +300,12 @@ describe('Part 3: Persistence, isCounting & Queue Job Handoff', () => {
       expect(sqlList.some((s) => s.includes('INSERT INTO submissions'))).toBe(true);
       expect(sqlList.some((s) => s.includes('INSERT INTO submission_jobs'))).toBe(true);
       expect(sqlList.some((s) => s.includes('INSERT INTO idempotency_records'))).toBe(true);
+      expect(sqlList.some((s) => s.includes("SELECT pg_notify('submission_jobs_ready', $1)"))).toBe(
+        true,
+      );
+      expect(sqlList.some((s) => s.includes("SELECT pg_notify('submission_jobs_ready', $1)"))).toBe(
+        true,
+      );
       expect(sqlList[sqlList.length - 1]).toBe('COMMIT');
     });
 

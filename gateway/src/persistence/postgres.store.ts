@@ -704,6 +704,8 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
         ],
       );
 
+      await client.query("SELECT pg_notify('submission_jobs_ready', $1)", [job.id]);
+
       await client.query('COMMIT');
       return responseBody;
     } catch (err) {
@@ -937,6 +939,7 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
            WHERE submission_id = $1`,
           [input.submissionId],
         );
+        await client.query("SELECT pg_notify('submission_jobs_ready', $1)", [input.submissionId]);
       } else {
         await client.query(
           `UPDATE submission_jobs
@@ -1098,6 +1101,14 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
       [submissionId],
     );
     return res.rows.map(mapConstraintFindingRow);
+  }
+
+  async countLabModelCalls(labId: string): Promise<number> {
+    const res = await this.requirePool().query<{ total: string | number }>(
+      'SELECT COUNT(*)::int AS total FROM model_call_logs WHERE lab_id = $1',
+      [labId],
+    );
+    return Number(res.rows[0]?.total ?? 0);
   }
 
   async listLabReviewQueue(
