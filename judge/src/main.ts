@@ -3,7 +3,9 @@ import { HttpCheckerClient } from './checker/checker-http.client';
 import { loadWorkerConfig } from './config';
 import { PostgresJobStore } from './queue/job-store';
 import { JudgeWorker } from './queue/worker';
+import { DockerSandboxRunner } from './sandbox/docker-runner';
 import { ProcessSandboxRunner } from './sandbox/process-runner';
+import type { SandboxRunner } from './sandbox/runner.interface';
 
 function loadLocalEnv(): void {
   for (const envPath of ['.env', '../.env']) {
@@ -21,10 +23,17 @@ async function bootstrap(): Promise<void> {
     databaseUrl: config.databaseUrl,
     poolMax: config.dbPoolMax,
   });
-  const sandboxRunner = new ProcessSandboxRunner({
-    gppBinary: config.gppBinary,
-    compileTimeoutMs: config.compileTimeoutMs,
-  });
+  const sandboxRunner: SandboxRunner =
+    config.sandboxMode === 'docker'
+      ? new DockerSandboxRunner({
+          image: config.sandboxImage,
+          dockerBinary: config.dockerBinary,
+          compileTimeoutMs: config.compileTimeoutMs,
+        })
+      : new ProcessSandboxRunner({
+          gppBinary: config.gppBinary,
+          compileTimeoutMs: config.compileTimeoutMs,
+        });
   const checkerClient = new HttpCheckerClient({
     baseUrl: config.checkerUrl,
     timeoutMs: config.checkerTimeoutMs,
@@ -58,7 +67,7 @@ async function bootstrap(): Promise<void> {
   process.on('SIGINT', () => void shutdown('SIGINT'));
 
   console.log(
-    `[judge-worker] Starting id=${config.workerId} checkerUrl=${config.checkerUrl} pollMs=${config.pollIntervalMs}`,
+    `[judge-worker] Starting id=${config.workerId} sandbox=${config.sandboxMode} image=${config.sandboxImage} checkerUrl=${config.checkerUrl}`,
   );
   await worker.start();
 }

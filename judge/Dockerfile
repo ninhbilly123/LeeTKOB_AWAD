@@ -11,14 +11,15 @@ RUN npm ci --workspace=judge --include-workspace-root=false
 COPY judge ./judge
 RUN npm run build --workspace=judge
 
-# Stage 2: Minimal non-root runtime with g++ (C++17) and zero LLM provider secrets
+# Stage 2: Grab static Docker CLI binary (client-only; talks to internal docker-socket-proxy)
+FROM docker:27.5.1-cli AS docker-cli
+
+# Stage 3: Minimal non-root runtime with Docker CLI and zero LLM provider secrets
 FROM node:22.14-bookworm-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends g++ \
-    && rm -rf /var/lib/apt/lists/*
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 
 COPY package.json package-lock.json ./
 COPY gateway/package.json ./gateway/package.json

@@ -17,6 +17,7 @@ Course Project: **CSC13114 — Advanced Web Application Development (Capstone Co
 ## 2. Monorepo Architecture
 
 The repository is structured as a multi-service monorepo:
+
 - `gateway/`: Gateway and Core API built with Node.js / NestJS (Authentication, Labs, Submissions, Review Queue).
 - `checker/`: Constraint-checking service in Python (Tree-sitter C++ AST parser for hard rules & LLM semantic checker).
 - `web/`: Frontend user interface built with React + Vite + TypeScript (TA review dashboard & Student submission portal).
@@ -28,11 +29,13 @@ The repository is structured as a multi-service monorepo:
 ## 3. Fresh Clone Setup
 
 ### Prerequisites
+
 - **Node.js**: 22.x (matches CI)
 - **npm**: >= 10
 - **Python**: 3.12.x (matches CI)
 
 ### Installation Steps
+
 ```bash
 # Run from the repository root.
 # 1. Install the exact Node.js dependencies from package-lock.json, as CI does.
@@ -63,12 +66,12 @@ On systems where Python is named `python3`, use `python3 -m pip install -r check
 
 In strict accordance with **Criterion 3 of PA#2**, each quality check runs with **one documented command**, identical locally and in CI:
 
-| Check Type | Canonical Command | Description |
-|---|---|---|
-| **Lint** | `npm run lint` | Runs ESLint across `gateway`, `web`, `judge` and Ruff Lint across `checker` |
-| **Format Check** | `npm run format:check` | Checks formatting via Prettier on `gateway`, `web`, `judge` and Ruff Format on `checker` |
-| **Type Check** | `npm run typecheck` | Checks static types with `tsc --noEmit` (`gateway`, `web`, `judge`) and `mypy` (`checker`) |
-| **Tests** | `npm run test` | Runs Jest unit/contract tests (`gateway`, `judge`), Vitest (`web`), and Pytest (`checker`) |
+| Check Type       | Canonical Command      | Description                                                                                |
+| ---------------- | ---------------------- | ------------------------------------------------------------------------------------------ |
+| **Lint**         | `npm run lint`         | Runs ESLint across `gateway`, `web`, `judge` and Ruff Lint across `checker`                |
+| **Format Check** | `npm run format:check` | Checks formatting via Prettier on `gateway`, `web`, `judge` and Ruff Format on `checker`   |
+| **Type Check**   | `npm run typecheck`    | Checks static types with `tsc --noEmit` (`gateway`, `web`, `judge`) and `mypy` (`checker`) |
+| **Tests**        | `npm run test`         | Runs Jest unit/contract tests (`gateway`, `judge`), Vitest (`web`), and Pytest (`checker`) |
 
 After installation, run all four commands from the repository root:
 
@@ -179,3 +182,19 @@ node leetkob-eval/eval.mjs --data leetkob-eval --predictions predictions-model-o
 ```bash
 node scripts/verify-n1-worker.mjs
 ```
+
+---
+
+## 9. Hardened C++17 Docker Sandbox & 9-Row Attack Suite (Task N2)
+
+Both compilation (`g++ -std=c++17 -O2`) and execution run inside fresh ephemeral `leetkob-cpp-sandbox:pa3` containers (`judge/sandbox/Dockerfile`, zero host mounts, `--network none`, `--read-only` + bounded `--tmpfs`, `--user 65534:65534`, `--cap-drop ALL`, `--security-opt no-new-privileges`, `--memory=<M>m --memory-swap=<M>m`, `--pids-limit 16`, `--cpus 1` + `RLIMIT_CPU`, wall-clock container kill via `docker rm -f`, 1 MiB output cap, and zero secrets). In `docker-compose.yml`, `judge-worker` talks only to an internal narrow-privilege `docker-socket-proxy` (`CONTAINERS=1`, `VOLUMES=0`, `EXEC=0`).
+
+### Run the 9 Rubric Attack Submissions Locally (Requires Docker)
+
+```bash
+npm run build --workspace=judge
+npm run sandbox:build --workspace=judge
+npm run test:sandbox --workspace=judge
+```
+
+The same suite runs automatically in GitHub Actions (`.github/workflows/ci.yml` — job `Sandbox Security Suite (9 Minimums — Docker)`) on pull requests, pushes to `main`, and the `pa3` release tag, publishing a 9-row Markdown summary table while keeping the 4 canonical README checks 100% offline.
