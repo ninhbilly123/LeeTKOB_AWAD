@@ -1,5 +1,6 @@
 import { HttpStatus, Injectable, Optional } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import { AuthStore } from '../auth/auth.store';
 import { problemException } from '../common/http-problems';
 import {
   AtomicCreateSubmissionParams,
@@ -33,6 +34,7 @@ export class SubmissionStore {
   constructor(
     private readonly labsStore: LabsStore,
     @Optional() private readonly postgres?: PostgresPersistence,
+    @Optional() private readonly authStore?: AuthStore,
   ) {}
 
   private get usePostgres(): boolean {
@@ -149,6 +151,35 @@ export class SubmissionStore {
     return 'RETRYING';
   }
 
+  private rebalanceLabPassSampleInMemory(labId: string, preferSubmissionId?: string): void {
+    const countingSubs = [...this.submissions.values()].filter(
+      (s) => s.labId === labId && s.isCounting && s.overallVerdict === 'AC',
+    );
+    const allPassFindings = countingSubs.flatMap((s) =>
+      (this.findings.get(s.id) ?? []).filter((f) => f.verdict === 'pass'),
+    );
+    const requiredSampled = Math.ceil(0.1 * allPassFindings.length);
+    let currentSampled = allPassFindings.filter((f) => f.isSampledPass).length;
+    const candidates = [...allPassFindings].sort((a, b) => {
+      if (preferSubmissionId) {
+        const aPref = a.submissionId === preferSubmissionId ? 0 : 1;
+        const bPref = b.submissionId === preferSubmissionId ? 0 : 1;
+        if (aPref !== bPref) return aPref - bPref;
+      }
+      return a.id.localeCompare(b.id);
+    });
+    for (const pf of candidates) {
+      if (currentSampled >= requiredSampled) break;
+      if (!pf.isSampledPass) {
+        pf.isSampledPass = true;
+        if (pf.reviewStatus === 'NOT_QUEUED') {
+          pf.reviewStatus = 'PENDING_REVIEW';
+        }
+        currentSampled += 1;
+      }
+    }
+  }
+
   async recordJudgeResultAsync(input: JudgeCompletionInput): Promise<void> {
     if (this.usePostgres) {
       await this.postgres!.recordJudgeResult(input);
@@ -184,6 +215,9 @@ export class SubmissionStore {
         job.status = 'DONE';
       }
     }
+    if (sub && input.overallVerdict !== 'AC') {
+      this.rebalanceLabPassSampleInMemory(sub.labId);
+    }
   }
 
   async recordCheckerResultAsync(input: CheckerCompletionInput): Promise<void> {
@@ -197,6 +231,7 @@ export class SubmissionStore {
       return {
         id: `fnd_${input.submissionId}_${f.constraintCode}`,
         submissionId: input.submissionId,
+        labId: input.labId,
         constraintId: `con_${input.labId}_${f.constraintCode}`,
         constraintCode: f.constraintCode,
         source: f.source,
@@ -216,30 +251,15 @@ export class SubmissionStore {
     });
     this.findings.set(input.submissionId, records);
 
-    // Enforce FAQ-10 10% pass sampling across counting AC submissions in this lab
-    const countingSubs = [...this.submissions.values()].filter(
-      (s) => s.labId === input.labId && s.isCounting && s.overallVerdict === 'AC',
-    );
-    const allPassFindings = countingSubs.flatMap((s) =>
-      (this.findings.get(s.id) ?? []).filter((f) => f.verdict === 'pass'),
-    );
-    const requiredSampled = Math.ceil(0.1 * allPassFindings.length);
-    let currentSampled = allPassFindings.filter((f) => f.isSampledPass).length;
-    for (const pf of allPassFindings) {
-      if (currentSampled >= requiredSampled) break;
-      if (!pf.isSampledPass) {
-        pf.isSampledPass = true;
-        if (pf.reviewStatus === 'NOT_QUEUED') {
-          pf.reviewStatus = 'PENDING_REVIEW';
-        }
-        currentSampled += 1;
-      }
-    }
-
     const sub = this.submissions.get(input.submissionId);
     if (sub) {
       sub.checkerStatus = 'COMPLETED';
+      sub.checkerModel = input.model ?? null;
+      sub.promptVersion = input.promptVersion ?? null;
+      sub.checkedAt = input.checkedAt ?? new Date().toISOString();
     }
+    this.rebalanceLabPassSampleInMemory(input.labId, input.submissionId);
+
     const job = [...this.jobs.values()].find((j) => j.submissionId === input.submissionId);
     if (job) {
       job.status = 'DONE';
@@ -359,6 +379,11 @@ export class SubmissionStore {
       }
     }
 
+    const studentUser = this.authStore?.findUserById(params.studentId);
+    const studentIdentifiers = studentUser
+      ? [studentUser.id, studentUser.username, studentUser.email, studentUser.displayName]
+      : [params.studentId];
+
     const submittedAt = new Date(params.receivedAt).toISOString();
     const submission: Submission = {
       id: `sub_${randomUUID()}`,
@@ -372,7 +397,7 @@ export class SubmissionStore {
     };
     this.saveSubmission(submission);
 
-    const job = buildSubmissionJob(submission, lab, new Date().toISOString());
+    const job = buildSubmissionJob(submission, lab, new Date().toISOString(), studentIdentifiers);
     this.jobs.set(job.id, job);
 
     const result: SubmissionResponse = {

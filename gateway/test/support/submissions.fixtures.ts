@@ -78,7 +78,7 @@ MOCK_MEMBERSHIPS.push({
 
 export const authStore = new AuthStore();
 export const labsStore = new LabsStore();
-export const submissionStore = new SubmissionStore(labsStore);
+export const submissionStore = new SubmissionStore(labsStore, undefined, authStore);
 
 export function resetAllStores(): void {
   authStore.seedDefaults(MOCK_MEMBERSHIPS);

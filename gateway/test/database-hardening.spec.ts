@@ -14,7 +14,7 @@ import { seedDemoDatabase } from '../src/persistence/seed-demo.cli';
 
 describe('Database Hardening: Migrations, Config, Centipoints & Worker Outbox', () => {
   describe('SQL Migration Integrity (Session 04 & PA#3 Contract Alignment)', () => {
-    it('defines paired .up.sql and .down.sql files with lock_timeout, FKs, CHECKs, and all 9 indexes', () => {
+    it('defines paired .up.sql and .down.sql files with lock_timeout, 16 normalized tables, FKs, CHECKs, and all 12 indexes', () => {
       const pairs = listMigrationPairs();
       expect(pairs.some((p) => p.version === REQUIRED_MIGRATION_VERSION)).toBe(true);
 
@@ -26,7 +26,7 @@ describe('Database Hardening: Migrations, Config, Centipoints & Worker Outbox', 
       expect(upSql).toContain("SET lock_timeout = '2s';");
       expect(downSql).toContain("SET lock_timeout = '2s';");
 
-      // Normalized tables
+      // All 16 normalized tables (proposal-detail.md §4.2 + FAQ-01..14 + checker-output.md)
       for (const table of [
         'users',
         'classes',
@@ -35,32 +35,64 @@ describe('Database Hardening: Migrations, Config, Centipoints & Worker Outbox', 
         'labs',
         'lab_test_cases',
         'lab_constraints',
+        'lab_constraint_revisions',
         'submissions',
         'submission_test_results',
         'submission_jobs',
         'idempotency_records',
         'constraint_findings',
         'model_call_logs',
+        'grade_appeals',
         'audit_logs',
       ]) {
         expect(upSql).toContain(`CREATE TABLE IF NOT EXISTS ${table}`);
         expect(downSql).toContain(`DROP TABLE IF EXISTS ${table};`);
       }
 
-      // Critical invariants: centipoints, FAQ-04 partial unique index, FAQ-05 limits, FAQ-09 7 unsure reasons & TA evidence check, N1 model_call_logs unique request_id
+      // Verify strict reverse FK drop order for newly added child tables
+      expect(downSql.indexOf('DROP TABLE IF EXISTS grade_appeals;')).toBeLessThan(
+        downSql.indexOf('DROP TABLE IF EXISTS constraint_findings;'),
+      );
+      expect(downSql.indexOf('DROP TABLE IF EXISTS lab_constraint_revisions;')).toBeLessThan(
+        downSql.indexOf('DROP TABLE IF EXISTS lab_constraints;'),
+      );
+
+      // Critical invariants: centipoints, FAQ-01/04/05/07/09/12/13/14, checker-output.md
+      expect(upSql).toContain('invite_code TEXT NULL UNIQUE');
+      expect(upSql).toContain('constraints_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()');
+      expect(upSql).toContain(
+        "check_type TEXT NOT NULL DEFAULT 'LLM' CHECK (check_type IN ('HARD_RULE', 'LLM', 'SEMANTIC_LLM'))",
+      );
       expect(upSql).toContain(
         'deduction_centipoints INTEGER NOT NULL CHECK (deduction_centipoints BETWEEN 0 AND 1000)',
       );
+      expect(upSql).toContain(
+        'CHECK (new_deduction_centipoints <= previous_deduction_centipoints)',
+      );
       expect(upSql).toContain('CREATE UNIQUE INDEX IF NOT EXISTS uniq_submissions_counting');
+      expect(upSql).toContain('UNIQUE (student_id, lab_id, idempotency_key)');
+      expect(upSql).toContain('checker_model TEXT NULL');
+      expect(upSql).toContain('prompt_version TEXT NULL');
+      expect(upSql).toContain('checked_at TIMESTAMPTZ NULL');
+      expect(upSql).toContain('manual_score_centipoints INTEGER NULL');
       expect(upSql).toContain(
         'cpu_time_limit_sec INTEGER NOT NULL DEFAULT 1 CHECK (cpu_time_limit_sec BETWEEN 1 AND 5)',
       );
       expect(upSql).toContain(
         'memory_limit_mb INTEGER NOT NULL DEFAULT 256 CHECK (memory_limit_mb BETWEEN 64 AND 512)',
       );
+      expect(upSql).toContain('FOREIGN KEY (lab_id, constraint_code)');
       expect(upSql).toContain("CHECK ((verdict = 'unsure') = (unsure_reason IS NOT NULL))");
+      expect(upSql).toContain("verdict <> 'violation'");
+      expect(upSql).toContain(
+        "CHECK ((review_status IN ('NOT_QUEUED', 'PENDING_REVIEW')) = (ta_decision IS NULL))",
+      );
       expect(upSql).toContain("ta_decision IS DISTINCT FROM 'VIOLATION'");
-      expect(upSql).toContain('UNIQUE (submission_id, request_id)');
+      // model_call_logs allows empty request_id on TIMEOUT/PROVIDER_ERROR, enforces non-empty on OK
+      expect(upSql).toContain('UNIQUE (submission_id, call_ordinal)');
+      expect(upSql).toContain("CHECK (status <> 'OK' OR btrim(request_id) <> '')");
+      expect(upSql).toContain('CREATE UNIQUE INDEX IF NOT EXISTS uniq_model_call_logs_req_id');
+      expect(upSql).toContain('finding_id TEXT NOT NULL UNIQUE REFERENCES constraint_findings(id)');
       for (const reason of [
         'MODEL_UNSURE',
         'SCHEMA_INVALID',
@@ -82,6 +114,9 @@ describe('Database Hardening: Migrations, Config, Centipoints & Worker Outbox', 
         'idx_submissions_lab_ac',
         'idx_jobs_claimable',
         'idx_findings_pending_by_sub',
+        'idx_findings_lab_review',
+        'uniq_model_call_logs_req_id',
+        'idx_appeals_lab_status',
         'idx_idempotency_expires',
       ]) {
         expect(upSql).toContain(idx);
@@ -331,8 +366,15 @@ describe('Database Hardening: Migrations, Config, Centipoints & Worker Outbox', 
           isActive: true,
         },
         '2026-11-27T00:00:00.000Z',
+        ['std_1', 'student1', 'student1@leetkob.edu.vn', 'Student One'],
       );
       expect(job.statement).toBe('# Full Markdown Statement for Checker');
+      expect(job.studentIdentifiers).toEqual([
+        'std_1',
+        'student1',
+        'student1@leetkob.edu.vn',
+        'Student One',
+      ]);
 
       const queries: Array<{ text: string; values?: unknown[] }> = [];
       let simulateFailedAttempts = false;
@@ -355,9 +397,32 @@ describe('Database Hardening: Migrations, Config, Centipoints & Worker Outbox', 
               rowCount: 1,
             };
           }
+          if (text.includes('RETURNING lab_id')) {
+            return {
+              rows: [{ lab_id: 'lab_1' }] as unknown as R[],
+              rowCount: 1,
+            };
+          }
           if (text.includes('SELECT id, constraint_code FROM lab_constraints')) {
             return {
-              rows: [{ id: 'con_lab_1_C1', constraint_code: 'C1' }] as unknown as R[],
+              rows: [
+                { id: 'con_lab_1_C1', constraint_code: 'C1' },
+                { id: 'con_lab_1_C2', constraint_code: 'C2' },
+              ] as unknown as R[],
+              rowCount: 2,
+            };
+          }
+          if (text.includes('SELECT deadline, published_at FROM labs')) {
+            return {
+              rows: [
+                { deadline: '2026-01-01T00:00:00.000Z', published_at: null },
+              ] as unknown as R[],
+              rowCount: 1,
+            };
+          }
+          if (text.includes('AS pending_count')) {
+            return {
+              rows: [{ pending_count: '0' }] as unknown as R[],
               rowCount: 1,
             };
           }
@@ -367,6 +432,7 @@ describe('Database Hardening: Migrations, Config, Centipoints & Worker Outbox', 
                 {
                   id: 'fnd_1',
                   submission_id: 'sub_1',
+                  lab_id: 'lab_1',
                   constraint_id: 'con_lab_1_C1',
                   constraint_code: 'C1',
                   source: 'HARD_RULE',
@@ -429,9 +495,28 @@ describe('Database Hardening: Migrations, Config, Centipoints & Worker Outbox', 
         queries.some((q) => q.text.includes('ON CONFLICT (submission_id, ordinal) DO UPDATE')),
       ).toBe(true);
 
+      // Non-AC superseding submission rebalances FAQ-10 10% pass sample across lab
+      const beforeWaCount = queries.filter((q) =>
+        q.text.includes('CEIL(0.10 * total_pass)'),
+      ).length;
+      await pg.recordJudgeResult({
+        submissionId: 'sub_wa_2',
+        overallVerdict: 'WA',
+        compileOutput: null,
+        testResults: [{ ordinal: 1, verdict: 'WA', timeMs: 10, memoryKb: 2048 }],
+        maxTimeMs: 10,
+        maxMemoryKb: 2048,
+        judgedAt: '2026-11-27T00:05:00.000Z',
+      });
+      const afterWaCount = queries.filter((q) => q.text.includes('CEIL(0.10 * total_pass)')).length;
+      expect(afterWaCount).toBe(beforeWaCount + 1);
+
       await pg.recordCheckerResult({
         submissionId: 'sub_1',
         labId: 'lab_1',
+        model: 'gemini-3.1-flash-lite-preview',
+        promptVersion: 'v1',
+        checkedAt: '2026-11-27T00:01:00.000Z',
         findings: [
           {
             constraintCode: 'C1',
@@ -441,24 +526,65 @@ describe('Database Hardening: Migrations, Config, Centipoints & Worker Outbox', 
             evidence: [{ line: 2, text: '#include <algorithm>' }],
             reason: 'Banned header detected.',
           },
+          {
+            constraintCode: 'C2',
+            source: 'LLM',
+            verdict: 'unsure',
+            unsureReason: 'TIMEOUT',
+            evidence: [],
+            reason: 'LLM request timed out.',
+          },
         ],
         callLogs: [
           {
             requestId: 'req_real_123',
             model: 'gemini-3.1-flash-lite-preview',
+            promptVersion: 'v1',
             constraints: ['C2'],
             sanitizedPrompt: '...',
+            rawResponse: '{"results":[]}',
             inputTokens: 120,
             outputTokens: 45,
             latencyMs: 420,
             estimatedCostUsd: 0.00012,
             status: 'OK',
           },
+          {
+            // TIMEOUT / PROVIDER_ERROR calls emit empty requestId in checker/src/semantic_checker.py
+            requestId: '',
+            model: 'gemini-3.1-flash-lite-preview',
+            promptVersion: 'v1',
+            constraints: ['C2'],
+            sanitizedPrompt: '...',
+            rawResponse: null,
+            inputTokens: 0,
+            outputTokens: 0,
+            latencyMs: 30000,
+            estimatedCostUsd: 0,
+            status: 'TIMEOUT',
+          },
         ],
       });
-      expect(
-        queries.some((q) => q.text.includes('ON CONFLICT (submission_id, request_id) DO NOTHING')),
-      ).toBe(true);
+      const mclInserts = queries.filter((q) => q.text.includes('INSERT INTO model_call_logs'));
+      expect(mclInserts).toHaveLength(2);
+      expect(mclInserts[0].text).toContain('ON CONFLICT (submission_id, call_ordinal) DO UPDATE');
+      expect(mclInserts[1].values?.[3]).toBe(2); // call_ordinal = 2
+      expect(mclInserts[1].values?.[4]).toBe(''); // empty request_id permitted for TIMEOUT
+      expect(mclInserts[1].values?.[14]).toBe('TIMEOUT');
+      const subCheckerUpdate = queries.find(
+        (q) => q.text.includes('UPDATE submissions') && q.text.includes('checker_model = $2'),
+      );
+      expect(subCheckerUpdate?.values).toEqual([
+        'sub_1',
+        'gemini-3.1-flash-lite-preview',
+        'v1',
+        '2026-11-27T00:01:00.000Z',
+      ]);
+      const findingInserts = queries.filter((q) =>
+        q.text.includes('INSERT INTO constraint_findings'),
+      );
+      expect(findingInserts).toHaveLength(2);
+      expect(findingInserts[0].values?.[2]).toBe('lab_1'); // lab_id stored directly on finding
       expect(queries.some((q) => q.text.includes('CEIL(0.10 * total_pass)'))).toBe(true);
 
       // TA review enforces FAQ-09 evidence requirement on VIOLATION
@@ -485,8 +611,24 @@ describe('Database Hardening: Migrations, Config, Centipoints & Worker Outbox', 
         reason: 'Confirmed by TA',
       });
       expect(reviewed.reviewStatus).toBe('APPROVED_VIOLATION');
+      expect(reviewed.labId).toBe('lab_1');
       expect(reviewed.taDeduction).toBe(3);
       expect(queries.some((q) => q.text.includes('INSERT INTO audit_logs'))).toBe(true);
+
+      // publishLabAtomic rebalances FAQ-10 10% pass sample before checking PENDING_REVIEW
+      const beforePublishRebalance = queries.filter((q) =>
+        q.text.includes('CEIL(0.10 * total_pass)'),
+      ).length;
+      const publishedAt = await pg.publishLabAtomic(
+        'lab_1',
+        'usr_ta_01',
+        Date.parse('2026-11-28T00:00:00.000Z'),
+      );
+      expect(publishedAt).toBe('2026-11-28T00:00:00.000Z');
+      const afterPublishRebalance = queries.filter((q) =>
+        q.text.includes('CEIL(0.10 * total_pass)'),
+      ).length;
+      expect(afterPublishRebalance).toBe(beforePublishRebalance + 1);
     });
   });
 });
