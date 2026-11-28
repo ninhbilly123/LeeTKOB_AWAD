@@ -17,6 +17,7 @@ Course Project: **CSC13114 — Advanced Web Application Development (Capstone Co
 ## 2. Monorepo Architecture
 
 The repository is structured as a multi-service monorepo:
+
 - `gateway/`: Gateway and Core API built with Node.js / NestJS (Authentication, Labs, Submissions, Review Queue).
 - `checker/`: Constraint-checking service in Python (Tree-sitter C++ AST parser for hard rules & LLM semantic checker).
 - `web/`: Frontend user interface built with React + Vite + TypeScript (TA review dashboard & Student submission portal).
@@ -28,11 +29,13 @@ The repository is structured as a multi-service monorepo:
 ## 3. Fresh Clone Setup
 
 ### Prerequisites
+
 - **Node.js**: 22.x (matches CI)
 - **npm**: >= 10
 - **Python**: 3.12.x (matches CI)
 
 ### Installation Steps
+
 ```bash
 # Run from the repository root.
 # 1. Install the exact Node.js dependencies from package-lock.json, as CI does.
@@ -63,12 +66,12 @@ On systems where Python is named `python3`, use `python3 -m pip install -r check
 
 In strict accordance with **Criterion 3 of PA#2**, each quality check runs with **one documented command**, identical locally and in CI:
 
-| Check Type | Canonical Command | Description |
-|---|---|---|
-| **Lint** | `npm run lint` | Runs ESLint across `gateway`, `web` and Ruff Lint across `checker` |
-| **Format Check** | `npm run format:check` | Checks formatting via Prettier on `gateway`, `web` and Ruff Format on `checker` |
-| **Type Check** | `npm run typecheck` | Checks static types with `tsc --noEmit` (`gateway`, `web`) and `mypy` (`checker`) |
-| **Tests** | `npm run test` | Runs Jest unit/contract tests (`gateway`), Vitest (`web`), and Pytest (`checker`) |
+| Check Type       | Canonical Command      | Description                                                                                |
+| ---------------- | ---------------------- | ------------------------------------------------------------------------------------------ |
+| **Lint**         | `npm run lint`         | Runs ESLint across `gateway`, `web`, `judge` and Ruff Lint across `checker`                |
+| **Format Check** | `npm run format:check` | Checks formatting via Prettier on `gateway`, `web`, `judge` and Ruff Format on `checker`   |
+| **Type Check**   | `npm run typecheck`    | Checks static types with `tsc --noEmit` (`gateway`, `web`, `judge`) and `mypy` (`checker`) |
+| **Tests**        | `npm run test`         | Runs Jest unit/contract tests (`gateway`, `judge`), Vitest (`web`), and Pytest (`checker`) |
 
 After installation, run all four commands from the repository root:
 
@@ -79,17 +82,18 @@ npm run typecheck
 npm run test
 ```
 
-Each command checks `gateway`, `web`, and `checker`, and exits with a nonzero status when a step fails. CI runs these same four commands.
+Each command checks `gateway`, `web`, `judge`, and `checker`, and exits with a nonzero status when a step fails. CI runs these same four commands.
 
 ### Line endings on Windows and Linux
 
-`.gitattributes` checks out text files with LF line endings even when Git's `core.autocrlf` is enabled. Both Prettier configurations explicitly require LF, so Windows and Linux use the same format check. Windows `.bat` and `.cmd` files use CRLF.
+`.gitattributes` checks out text files with LF line endings even when Git's `core.autocrlf` is enabled. All Prettier configurations explicitly require LF, so Windows and Linux use the same format check. Windows `.bat` and `.cmd` files use CRLF.
 
 For an existing checkout with CRLF files, normalize the checked source files with the installed formatters, then rerun the format check:
 
 ```bash
 npm exec --workspace=gateway -- prettier --write "src/**/*.ts" "test/**/*.ts"
 npm exec --workspace=web -- prettier --write "src/**/*.{ts,tsx}"
+npm exec --workspace=judge -- prettier --write "src/**/*.ts" "test/**/*.ts"
 python -m ruff format checker
 npm run format:check
 ```
@@ -165,3 +169,32 @@ node leetkob-eval/eval.mjs --data leetkob-eval --predictions predictions-model-o
       - `80 × (27,308 / 32) = 68,270` input tokens → `$0.006827`
       - `80 × (3,911 / 32) = 9,777.5` output tokens → `$0.003911`
       - **Total estimated paid-tier cost per 80-submission lab: `$0.010738` (~`$0.011 USD`)**.
+
+---
+
+## 8. Standalone Judge Worker & Durable Queue (Task N1)
+
+`judge/` runs as a standalone Node.js 22 + TypeScript worker consuming the PostgreSQL 16 durable queue (`submission_jobs` via `FOR UPDATE SKIP LOCKED` + `LISTEN submission_jobs_ready` + stale-lease recovery). See [docs/contract/queue-and-judge.md](docs/contract/queue-and-judge.md).
+
+- **Secret isolation:** `GEMINI_API_KEY` is injected **only** into the internal `checker` HTTP service (`checker/src/server.py`, `POST /check` and `GET /health`). `judge-worker` validates its environment at startup and refuses to run if `GEMINI_API_KEY` / `MODEL_API_KEY` is present.
+- **Stop → Submit → Restart verification:** With Docker Compose running (`docker compose up -d --build` and demo seed applied), verify durable queue handoff, `AC` checker trigger, and single-verdict idempotency via:
+
+```bash
+node scripts/verify-n1-worker.mjs
+```
+
+---
+
+## 9. Hardened C++17 Docker Sandbox & 9-Row Attack Suite (Task N2)
+
+Both compilation (`g++ -std=c++17 -O2`) and execution run inside fresh ephemeral `leetkob-cpp-sandbox:pa3` containers (`judge/sandbox/Dockerfile`, zero host mounts, `--network none`, `--read-only` + bounded `--tmpfs`, `--user 65534:65534`, `--cap-drop ALL`, `--security-opt no-new-privileges`, `--memory=<M>m --memory-swap=<M>m`, `--pids-limit 16`, `--cpus 1` + `RLIMIT_CPU`, wall-clock container kill via `docker rm -f`, 1 MiB output cap, and zero secrets). In `docker-compose.yml`, `judge-worker` talks only to an internal narrow-privilege `docker-socket-proxy` (`CONTAINERS=1`, `VOLUMES=0`, `EXEC=0`).
+
+### Run the 9 Rubric Attack Submissions Locally (Requires Docker)
+
+```bash
+npm run build --workspace=judge
+npm run sandbox:build --workspace=judge
+npm run test:sandbox --workspace=judge
+```
+
+The same suite runs automatically in GitHub Actions (`.github/workflows/ci.yml` — job `Sandbox Security Suite (9 Minimums — Docker)`) on pull requests, pushes to `main`, and the `pa3` release tag, publishing a 9-row Markdown summary table while keeping the 4 canonical README checks 100% offline.

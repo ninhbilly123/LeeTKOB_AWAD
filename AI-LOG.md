@@ -445,3 +445,86 @@ Team Members:
   - Deferred `web/` UI changes so frontend work stays separate from backend API commits.
 - **Validation**:
   - Ran `npm run lint`, `npm run format:check`, `npm run typecheck`, and `npm run test` across `gateway` and `web`: all passed (`gateway` Jest 8/8 suites, 85/85 tests; `web` Vitest 1/1 file, 1/1 test; ESLint, Prettier, `tsc --noEmit` clean).
+
+---
+
+## 2026-11-28 — Add feature specification guidance from CSC13114 Session 02
+
+- **Tool**: Codex.
+- **Asked for**: Compare the Specifications for Agents lecture with `docs/engineering-rules.md` and add the guidance the document was missing.
+- **Kept**: The Session 05 endpoint-contract rules and the existing submission API contract.
+- **Changed**: Added the feature spec outline, the five areas to check during spec review, and the mapping from numbered acceptance criteria to tests. Used submission idempotency as a LeeTKOB example and checked it against the contract and the existing concurrency test.
+- **Rejected**: Copying the restaurant example's endpoint and error format into LeeTKOB. Its API behavior is specific to the classroom example.
+- **Validation**: Verified the eight spec sections, both Markdown links, and a clean `git diff --check`. Application tests were skipped for this documentation edit.
+## 2026-11-28 — Sync PostgreSQL 16 migrations and Gateway persistence with `checker/`, FAQ, and Proposal (Phạm An Ninh)
+- **Tool**: Antigravity.
+- **Asked for**: Audit `gateway/migrations/0001_init_pa3_schema.{up,down}.sql` and `gateway/src/persistence/` against the merged `checker/` implementation (`models.py`, `hard_rules.py`, `sanitizer.py`, `guardrails.py`, `llm_client.py`, `semantic_checker.py`), `docs/contract/checker-output.md`, `docs/proposal/FAQ.md` (`FAQ-01`..`FAQ-14`), and `docs/proposal/proposal-detail.md` (§2, §4.2), document discrepancies in `docs/database-checker-sync-plan.md`, and apply the approved Option 1 consolidation directly into `0001_init_pa3_schema`.
+- **Kept**:
+  - Updated `gateway/migrations/0001_init_pa3_schema.up.sql` & `.down.sql` to 16 normalized tables with `SET lock_timeout = '2s'` and strict reverse-FK drops.
+  - Fixed a critical `model_call_logs` crash bug where `TIMEOUT` / `PROVIDER_ERROR` calls emit empty `request_id` (`""`) in `checker/src/semantic_checker.py`: replaced `CHECK (btrim(request_id) <> '')` with `CHECK (status <> 'OK' OR btrim(request_id) <> '')`, added `call_ordinal` (`UNIQUE (submission_id, call_ordinal)`), `prompt_version`, `raw_response`, and partial unique index `uniq_model_call_logs_req_id` when `request_id <> ''`.
+  - Preserved top-level `CheckerResult` metadata (`checker_model`, `prompt_version`, `checked_at`) and added manual grade override columns (`manual_score_centipoints`, `manual_score_reason`, `manual_scored_by`, `manual_scored_at`) plus `UNIQUE (student_id, lab_id, idempotency_key)` on `submissions`.
+  - Added DB-level `CHECK` constraints on `constraint_findings` requiring non-empty `evidence` when `verdict = 'violation'` and synchronizing `review_status` with `ta_decision`, added `lab_id` with composite `FOREIGN KEY (lab_id, constraint_code)` and `idx_findings_lab_review`, and aligned `lab_constraints.check_type` with `'HARD_RULE' | 'LLM' | 'SEMANTIC_LLM'`.
+  - Added `classes.invite_code` (`FAQ-01`), `labs.constraints_updated_at` & `lab_constraint_revisions` (`FAQ-07` non-increasing deduction check), and `grade_appeals` (`FAQ-13`/`FAQ-14` `UNIQUE (finding_id)` and mandatory TA resolution reason) with `idx_appeals_lab_status`.
+  - Added `studentIdentifiers` to `SubmissionJob` (`buildSubmissionJob`, `createSubmissionAtomic`, `SubmissionStore`) for `checker/src/sanitizer.py` prompt redaction (`FAQ-06`), and extracted reusable `rebalanceLabPassSample()` called from `recordCheckerResult()`, non-AC `recordJudgeResult()`, and `publishLabAtomic()` (`FAQ-02`, `FAQ-10`).
+  - Synced `docs/contract/auth-and-labs.md` (§6.1–§6.2) and `docs/database-plan.md`, and expanded `gateway/test/database-hardening.spec.ts`.
+- **Changed**:
+  - Kept `idempotency_records` `PRIMARY KEY (student_id, idempotency_key)` unchanged so cross-lab `Idempotency-Key` reuse continues returning `409 idempotency-conflict` per PA#2 regression test `gateway/test/submission-boundaries.contract.spec.ts`.
+- **Rejected**:
+  - Splitting the pre-deployment alignment into a `0002` `ALTER TABLE` migration after the user explicitly approved Option 1 (single clean `0001_init_pa3_schema` before PA#3 server deployment).
+  - Weakening `CHECK (status <> 'OK' OR btrim(request_id) <> '')` to drop `request_id` enforcement on `OK` calls (PA#3 Criterion 4 still requires real provider request IDs for every successful model call).
+- **Validation**:
+  - Ran all four canonical quality gates plus Gateway e2e and NestJS build offline: `npm run lint` (0 errors/warnings across Gateway, Web, Checker), `npm run format:check` (all clean), `npm run typecheck` (`tsc --noEmit` + `mypy` 13 files clean), `npm run test` (Gateway Jest 7 suites / 82 tests, Web Vitest 2 suites / 8 tests, Checker Pytest 26 tests = 116 passed), `npm run test:e2e --workspace=gateway` (1/1 passed), and `npm run build --workspace=gateway` (exit 0).
+
+---
+
+## 2026-11-28 — Implement Task N1: Durable PostgreSQL Queue, Standalone Judge Worker & Internal Checker HTTP Bridge (Phạm An Ninh)
+- **Tool**: Antigravity.
+- **Asked for**: Implement Task N1 (`pa3-team-tasks.md`) on branch `feat/judge-queue-worker`: agree and document the internal job/result contract, build a standalone `judge/` worker consuming the PostgreSQL durable queue (`submission_jobs` via `FOR UPDATE SKIP LOCKED` + `LISTEN/NOTIFY` + stale-lease recovery), store overall and per-test verdicts, trigger the isolated internal `checker` service for `AC` submissions only, guarantee single-verdict/finding idempotency on redelivery, and provide stop → submit → restart verification tests and script.
+- **Kept**:
+  - Added internal contract [docs/contract/queue-and-judge.md](docs/contract/queue-and-judge.md) aligning Gateway, PostgreSQL 16 durable queue, `judge/`, and `checker/`.
+  - Added stdlib HTTP server `checker/src/server.py` (`GET /health`, `POST /check` delegating to `check_submission()`) and 4 offline contract tests in `checker/tests/test_server.py` (0 new Python packages; CLI `python -m src` preserved).
+  - Updated `gateway/src/persistence/postgres.store.ts` to emit `SELECT pg_notify('submission_jobs_ready', ...)` on enqueue and `AC` → `CHECK` stage promotion, and added `countLabModelCalls(labId)` with test coverage in `gateway/test/persistence-and-queue.spec.ts`.
+  - Built standalone Node.js 22 + TypeScript workspace `judge/` (0 new npm packages — reusing pinned `pg`, `typescript`, `eslint`, `prettier`, `jest`, `ts-jest`):
+    - `judge/src/config.ts`: startup config validation that refuses to start if `GEMINI_API_KEY`, `MODEL_API_KEY`, or `GOOGLE_API_KEY` is present in `judge-worker`'s environment (PA#3 Criterion 2 secret isolation).
+    - `judge/src/sandbox/` (`runner.interface.ts`, `output-compare.ts`, `process-runner.ts`): pluggable `SandboxRunner` boundary for Task N2, `FAQ-05` output normalization, temporary path scrubbing in `compile_output`, and `FAQ-04` overall verdict calculation.
+    - `judge/src/checker/checker-http.client.ts`: HTTP client calling internal `checker` with timeout/schema validation and fail-safe degradation to `unsure` (`TIMEOUT` / `PROVIDER_ERROR` / `SCHEMA_INVALID` per `FAQ-09`).
+    - `judge/src/queue/job-store.ts` & `worker.ts` & `main.ts`: 3-phase short-transaction `PostgresJobStore` (`FOR UPDATE SKIP LOCKED`, `LISTEN submission_jobs_ready`, `ON CONFLICT DO UPDATE` idempotency, `rebalanceLabPassSample`), `InMemoryJobStore`, and `JudgeWorker` with graceful `SIGTERM`/`SIGINT` drain and lab LLM call cap (`MAX_LLM_CALLS_PER_LAB`).
+    - 14 offline Jest tests across `judge/test/{output-compare,checker-client,worker-lifecycle}.spec.ts` proving stop → submit → restart durability, non-AC checker bypass, double-delivery single-verdict/finding idempotency, lab LLM call cap, and secret isolation.
+  - Wired `judge` into root `package.json` workspaces, `package-lock.json`, `scripts/run-check.mjs` (all 4 canonical gates), `judge/Dockerfile`, `gateway/Dockerfile`, `docker-compose.yml` (`checker` + `judge-worker` with zero LLM keys in `judge-worker`), `.env.example` (empty variable names only), `README.md`, and `scripts/verify-n1-worker.mjs`.
+- **Changed**:
+  - Updated `gateway/Dockerfile` to copy `judge/package.json` alongside `gateway/package.json` and `web/package.json` so workspace `npm ci` remains in sync with the root `package-lock.json`.
+  - Formatted workspace TypeScript files using each workspace's `.prettierrc` (`npx prettier --config <ws>/.prettierrc --write`) after root-level formatting flagged LF/config drift in `gateway/test/persistence-and-queue.spec.ts`.
+- **Rejected**:
+  - Passing `GEMINI_API_KEY` into `judge-worker` or calling Gemini directly from `judge/` (violates Criterion 2 secret isolation; isolated behind internal `checker/src/server.py` instead).
+  - Adding an external message broker container (RabbitMQ) or new npm/Python packages when PostgreSQL 16 `FOR UPDATE SKIP LOCKED` + `LISTEN/NOTIFY` provides transactional outbox durability with zero dual-write risk and zero extra RAM.
+- **Validation**:
+  - Ran all four canonical root commands plus builds and e2e offline: `npm run lint` (Gateway, Web, Judge ESLint + Checker Ruff — 0 errors/warnings), `npm run format:check` (Gateway, Web, Judge Prettier + Checker Ruff Format 15 files clean), `npm run typecheck` (`tsc --noEmit` on Gateway/Web/Judge + `mypy --strict` on 15 Checker files clean), `npm run test` (Gateway Jest 7 suites / 82 tests, Web Vitest 2 suites / 8 tests, Judge Jest 3 suites / 14 tests, Checker Pytest 30 tests = **134 passed**), `npm run build --workspace=judge`, `npm run build --workspace=gateway`, and `npm run test:e2e --workspace=gateway` (1/1 passed). Live Docker Compose verification (`node scripts/verify-n1-worker.mjs`) is ready to run whenever Docker Desktop is started.
+
+---
+
+## 2026-11-28 — Implement Task N2: Hardened C++17 Docker Sandbox (9 Minimums), Attack Suite & `pa3` Tag CI (Phạm An Ninh)
+- **Tool**: Antigravity.
+- **Asked for**: Implement Task N2 (`pa3-team-tasks.md`) on branch `feat/n2-cpp-sandbox-ci`: compile and execute untrusted C++17 code inside isolated Docker containers enforcing all 9 PA#3 Criterion 2 minimums, add all 9 rubric attack `.cpp` submissions with expected assertions, configure `.github/workflows/ci.yml` to run the Docker sandbox suite on `pull_request`, `main`, and tag `pa3` with a 9-row CI summary table while keeping the 4 README quality gate commands 100% offline, and isolate Docker daemon access for `judge-worker` via `docker-socket-proxy`.
+- **Kept**:
+  - Created 11 C++17 test programs under `judge/attacks/`: `00_sanity_ac.cpp` (AC sanity check) + all 9 rubric attacks (`01_network_egress.cpp`, `02_cpu_time_limit.cpp`, `03_wall_clock_container_kill.cpp`, `04_memory_no_swap_readback.cpp` with mandatory volatile read-back pass, `05_fork_bomb_pids.cpp`, `06_output_flood.cpp`, `07_non_root_uid.cpp`, `08_no_host_mount_or_docker_sock.cpp`, `09a_no_secrets_env_and_files.cpp`, `09b_no_secrets_include.cpp`).
+  - Built isolated sandbox image `judge/sandbox/Dockerfile` (`gcc:12.4.0-bookworm`, `USER 65534:65534`) with C entrypoint `judge/sandbox/sandbox-exec.c` (`compile` & `run` modes streaming code, compiled ELF binary, and test input over `stdin` into bounded `--tmpfs /tmp` — **zero host mounts**, zero repository files, `RLIMIT_CPU`/`RLIMIT_FSIZE`/`RLIMIT_CORE`, and descendant reaping so orphan sleeping children keep the container alive until wall-clock `docker rm -f`).
+  - Implemented `DockerSandboxRunner` (`judge/src/sandbox/docker-runner.ts`) enforcing `--network none`, `--read-only`, `--tmpfs`, `--user 65534:65534`, `--cap-drop ALL`, `--security-opt no-new-privileges`, `--memory=<M>m --memory-swap=<M>m`, `--pids-limit 16`, `--cpus 1`, wall-clock container kill (`docker rm -f`), `State.OOMKilled` inspection -> `MLE`, and sanitized CLI env. Wired `SANDBOX_MODE=docker` (default) into `judge/src/config.ts` and `judge/src/main.ts`.
+  - Added 5 offline unit specs in `judge/test/docker-runner.spec.ts` and real Docker runner script `judge/scripts/run-sandbox-suite.mjs` emitting a 9-row Markdown summary table to stdout and `$GITHUB_STEP_SUMMARY`.
+  - Updated `judge/Dockerfile` (multi-stage copying static `docker:27.5.1-cli`), `docker-compose.yml` (internal `tecnativa/docker-socket-proxy:0.3.0` on `sandbox_ctrl` network with `CONTAINERS=1, VOLUMES=0, EXEC=0, SECRETS=0`), `.github/workflows/ci.yml` (`tags: [pa2, pa3]`, `permissions: { contents: read }`, keeping `Quality Gate (Lint, Format, Typecheck, Test)` intact and adding `Sandbox Security Suite (9 Minimums — Docker)`), `.env.example`, and `README.md`.
+- **Changed**:
+  - Refined Row 2 (`02_cpu_time_limit.cpp`) assertion in `judge/scripts/run-sandbox-suite.mjs` after the first real Docker run measured `3220ms` total (compile + run) to assert specifically on the execution phase `res.testResults[0].timeMs < 4000` (vs `5s` wall-clock), preventing CI flakiness on slower compile runners while still proving `RLIMIT_CPU` fired before wall-clock.
+  - Changed `sandbox-exec.c` from direct `execve` as PID 1 to a minimal PID 1 wrapper (`fork` + `waitpid(-1)` loop) after analyzing Linux PID-1 exit semantics: when Row 3's parent calls `_exit(0)` after forking a sleeping child, a minimal PID 1 keeps the container alive so the runner genuinely proves wall-clock `docker rm -f` kills the entire container.
+- **Rejected**:
+  - Using `-v /tmp/...:/work` host bind mounts to pass `solution.cpp` into the sandbox (violates Criterion 2 Row 8 "no host mounts" and breaks sibling containers); replaced with zero-mount `stdin` framing into `--tmpfs`.
+  - Exposing raw `/var/run/docker.sock` directly to `judge-worker` or sandbox containers; routed `judge-worker` through an internal narrow-privilege `docker-socket-proxy` while sandbox containers receive zero mounts and zero sockets.
+- **Validation**:
+  - Offline canonical gates: `npm run lint` (0 errors/warnings across all 4 services), `npm run format:check` (all clean), `npm run typecheck` (3 TS workspaces + `mypy --strict` 15 Python files), `npm run test` (Gateway 82 Jest + Web 8 Vitest + Judge 19 Jest + Checker 30 Pytest = **139 passed**), `npm run build --workspace=judge`, `npm run build --workspace=gateway`, and red-flag grep scan (0 matches).
+  - Real Docker verification (`npm run sandbox:build --workspace=judge` & `npm run test:sandbox --workspace=judge` on local Docker Desktop): `00_sanity_ac.cpp` -> `AC`, and **9/9 rubric attack rows PASSED** (`1=RE/0 canary hits`, `2=TLE via RLIMIT_CPU`, `3=TLE/0 lingering containers`, `4=MLE via OOMKilled`, `5=RE/0 lingering`, `6=RE`, `7=RE`, `8=RE`, `9a=RE & 9b=CE/0 canary leaks`).
+## 2026-11-28 — Add a skill for writing API contracts and contract tests
+
+- **Tool**: Codex.
+- **Asked for**: Combine the IA#3 CONTRACT.md, the applicable rubric, and LeeTKOB engineering rules into a reusable skill and require it in AGENTS.md.
+- **Kept**: The LeeTKOB submission contract's own authorization and replay behavior.
+- **Changed**: Added the five-section HTTP outline, a separate path for internal payloads, and a test workflow that checks both responses and persisted outcomes. Registered the skill in the repo catalog and AGENTS.md.
+- **Rejected**: Copying the IA#3 menu service's status codes and replay headers into LeeTKOB. These details belong to each endpoint's approved contract.
+- **Validation**: The skill-creator validator passed. Verified the five IA#3 sections, ten links, and the submission examples against the existing contract and test sources. Application tests were skipped for this documentation-only change.

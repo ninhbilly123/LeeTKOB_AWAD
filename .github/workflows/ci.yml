@@ -3,9 +3,13 @@ name: Quality Gate CI
 on:
   push:
     branches: [main]
-    tags: [pa2]
+    tags: [pa2, pa3]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -49,3 +53,29 @@ jobs:
 
       - name: Tests
         run: npm run test
+
+  sandbox-security-suite:
+    name: Sandbox Security Suite (9 Minimums — Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "npm"
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build Judge Worker
+        run: npm run build --workspace=judge
+
+      - name: Build Hardened C++17 Sandbox Image
+        run: npm run sandbox:build --workspace=judge
+
+      - name: Run 9 Rubric Attack Submissions in Docker Sandbox
+        run: npm run test:sandbox --workspace=judge

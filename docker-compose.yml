@@ -16,7 +16,7 @@ services:
       timeout: 5s
       retries: 10
 
-  # Explicit one-shot migration step executed before Gateway starts (Session 04 & 08)
+  # Explicit one-shot migration step executed before Gateway & Worker start (Session 04 & 08)
   gateway-migrate:
     build:
       context: .
@@ -58,6 +58,95 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # Isolated internal Constraint Checker service (ONLY container holding GEMINI_API_KEY)
+  checker:
+    build:
+      context: ./checker
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    entrypoint: ['python', '-m', 'src.server']
+    environment:
+      CHECKER_HOST: 0.0.0.0
+      CHECKER_PORT: ${CHECKER_PORT:-8000}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-}
+      MODEL_OFF: ${MODEL_OFF:-0}
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'python -c "import os, urllib.request; urllib.request.urlopen(''http://127.0.0.1:'' + os.environ.get(''CHECKER_PORT'', ''8000'') + ''/health'', timeout=3)"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Narrow-privilege Docker API proxy for judge-worker only (never exposed to sandbox containers)
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:0.3.0
+    restart: unless-stopped
+    networks:
+      - sandbox_ctrl
+    environment:
+      CONTAINERS: 1
+      POST: 1
+      ALLOW_START: 1
+      ALLOW_STOP: 1
+      INFO: 1
+      IMAGES: 1
+      VOLUMES: 0
+      NETWORKS: 0
+      SECRETS: 0
+      EXEC: 0
+      SWARM: 0
+      SYSTEM: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  # Build target for the isolated C++17 sandbox image (invoked on demand by judge-worker)
+  cpp-sandbox:
+    image: ${SANDBOX_IMAGE:-leetkob-cpp-sandbox:pa3}
+    build:
+      context: ./judge/sandbox
+      dockerfile: Dockerfile
+    profiles:
+      - build-only
+
+  # Standalone Judge & Checker Queue Worker (Task N1 + N2; strictly NO GEMINI_API_KEY in env)
+  judge-worker:
+    build:
+      context: .
+      dockerfile: judge/Dockerfile
+    restart: unless-stopped
+    networks:
+      - default
+      - sandbox_ctrl
+    depends_on:
+      postgres:
+        condition: service_healthy
+      gateway-migrate:
+        condition: service_completed_successfully
+      checker:
+        condition: service_healthy
+      docker-proxy:
+        condition: service_started
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      DATABASE_URL: postgresql://${DATABASE_USER:-leetkob}:${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}@postgres:5432/${DATABASE_NAME:-leetkob}
+      DB_POOL_MAX: ${DB_POOL_MAX:-10}
+      SANDBOX_MODE: ${SANDBOX_MODE:-docker}
+      SANDBOX_IMAGE: ${SANDBOX_IMAGE:-leetkob-cpp-sandbox:pa3}
+      DOCKER_HOST: ${DOCKER_HOST:-tcp://docker-proxy:2375}
+      CHECKER_URL: ${CHECKER_URL:-http://checker:8000}
+      CHECKER_TIMEOUT_MS: ${CHECKER_TIMEOUT_MS:-35000}
+      WORKER_POLL_INTERVAL_MS: ${WORKER_POLL_INTERVAL_MS:-1000}
+      STALE_JOB_AFTER_SEC: ${STALE_JOB_AFTER_SEC:-120}
+      MAX_LLM_CALLS_PER_LAB: ${MAX_LLM_CALLS_PER_LAB:-200}
+
+networks:
+  sandbox_ctrl:
+    internal: true
 
 volumes:
   postgres_data:
