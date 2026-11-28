@@ -79,6 +79,80 @@ export class SubmissionStore {
       .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt) || b.id.localeCompare(a.id));
   }
 
+  async listLabSubmissionsAsync(labId: string): Promise<Submission[]> {
+    if (this.usePostgres) {
+      return this.postgres!.listLabSubmissions(labId);
+    }
+    return [...this.submissions.values()]
+      .filter((s) => s.labId === labId)
+      .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt) || b.id.localeCompare(a.id));
+  }
+
+  async getSubmissionFindingsAsync(submissionId: string): Promise<ConstraintFindingRecord[]> {
+    if (this.usePostgres) {
+      return this.postgres!.getSubmissionFindings(submissionId);
+    }
+    return [...(this.findings.get(submissionId) ?? [])]
+      .map((f) => ({ ...f }))
+      .sort((a, b) => a.constraintCode.localeCompare(b.constraintCode));
+  }
+
+  async publishLabAtomicAsync(
+    labId: string,
+    actorId: string,
+    nowMs: number = Date.now(),
+  ): Promise<string> {
+    if (this.usePostgres) {
+      return this.postgres!.publishLabAtomic(labId, actorId, nowMs);
+    }
+    const lab = this.labsStore.getLab(labId);
+    if (!lab) {
+      throw problemException(HttpStatus.NOT_FOUND, `The requested lab '${labId}' does not exist.`);
+    }
+    if (lab.isPublished && lab.publishedAt) {
+      return lab.publishedAt;
+    }
+    if (nowMs < Date.parse(lab.deadline)) {
+      throw problemException(
+        HttpStatus.CONFLICT,
+        'Cannot publish grades before the lab deadline has passed (FAQ-12).',
+      );
+    }
+
+    const countingSubs = [...this.submissions.values()].filter(
+      (s) => s.labId === labId && Boolean(s.isCounting),
+    );
+    const uncheckedAcCount = countingSubs.filter(
+      (s) => s.overallVerdict === 'AC' && s.checkerStatus !== 'COMPLETED',
+    ).length;
+    if (uncheckedAcCount > 0) {
+      throw problemException(
+        HttpStatus.CONFLICT,
+        `Cannot publish grades while ${uncheckedAcCount} counted AC submission(s) have not finished constraint checking.`,
+      );
+    }
+
+    let pendingCount = 0;
+    for (const sub of countingSubs) {
+      const subFindings = this.findings.get(sub.id) ?? [];
+      pendingCount += subFindings.filter((f) => f.reviewStatus === 'PENDING_REVIEW').length;
+    }
+    if (pendingCount > 0) {
+      throw problemException(
+        HttpStatus.CONFLICT,
+        `Cannot publish grades while ${pendingCount} review item(s) remain PENDING_REVIEW (FAQ-12).`,
+      );
+    }
+
+    const publishedAt = new Date(nowMs).toISOString();
+    this.labsStore.saveLab({
+      ...lab,
+      isPublished: true,
+      publishedAt,
+    });
+    return publishedAt;
+  }
+
   async getSubmissionTestResultsAsync(submissionId: string): Promise<SubmissionTestResult[]> {
     if (this.usePostgres) {
       return this.postgres!.getSubmissionTestResults(submissionId);
