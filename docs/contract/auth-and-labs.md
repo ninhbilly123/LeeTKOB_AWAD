@@ -335,23 +335,27 @@ All error payloads return `Content-Type: application/problem+json` containing st
 
 ## 6. Durable Storage & Queue Job Contract (Worker Handoff)
 
-### 6.1 Database Schema (PostgreSQL 16 — Explicit Migrations)
+### 6.1 Database Schema (PostgreSQL 16 — Explicit Migrations, 16 Tables)
 Schema is managed via paired `.up.sql` / `.down.sql` migrations in `gateway/migrations/` (`0001_init_pa3_schema.up.sql` with `SET lock_timeout = '2s'`), executed explicitly via `npm run db:migrate --workspace=gateway` (or the `gateway-migrate` one-shot service in `docker-compose.yml`) rather than inside `onModuleInit()`:
 1. `users` (`id`, `username UNIQUE`, `email UNIQUE`, `display_name`, `password_hash`, `role CHECK`, `is_active`, `created_at`)
-2. `classes` (`id`, `code UNIQUE`, `name`, `term`, `created_by FK`, `created_at`)
+2. `classes` (`id`, `code UNIQUE`, `name`, `term`, `invite_code UNIQUE`, `created_by FK`, `created_at`)
 3. `class_staff` (`class_id FK`, `ta_id FK`, `PRIMARY KEY (class_id, ta_id)`)
 4. `class_enrollments` (`id`, `class_id FK`, `student_id FK`, `status CHECK`, `UNIQUE (class_id, student_id)`)
-5. `labs` (`id`, `class_id FK`, `title`, `statement`, `opened_at`, `deadline`, `cpu_time_limit_sec CHECK 1..5`, `memory_limit_mb CHECK 64..512`, `max_payload_bytes = 65536`, `is_active`, `published_at`, `created_by FK`)
+5. `labs` (`id`, `class_id FK`, `title`, `statement`, `opened_at`, `deadline`, `cpu_time_limit_sec CHECK 1..5`, `memory_limit_mb CHECK 64..512`, `max_payload_bytes = 65536`, `is_active`, `constraints_updated_at`, `published_at`, `created_by FK`)
 6. `lab_test_cases` (`id`, `lab_id FK`, `ordinal`, `is_hidden`, `input`, `expected_output`, `UNIQUE (lab_id, ordinal)`) — student queries filter `is_hidden = FALSE` in SQL (`FAQ-02`).
-7. `lab_constraints` (`id`, `lab_id FK`, `constraint_code`, `check_type`, `constraint_text`, `ban_patterns JSONB`, `deduction_centipoints INTEGER CHECK 0..1000`, `ordinal`, `UNIQUE (lab_id, constraint_code)`)
-8. `submissions` (`id`, `lab_id FK`, `student_id FK`, `code CHECK <= 65536 bytes`, `pipeline_status`, `overall_verdict`, `compile_output`, `passed_tests`, `total_tests`, `max_time_ms`, `max_memory_kb`, `is_counting`, `idempotency_key UUID`, `checker_status`, `submitted_at`, `judged_at`) + partial unique index `uniq_submissions_counting ON submissions (lab_id, student_id) WHERE is_counting = TRUE` (`FAQ-04`).
-9. `submission_test_results` (`submission_id FK`, `ordinal`, `verdict`, `time_ms`, `memory_kb`, `PRIMARY KEY (submission_id, ordinal)`)
-10. `submission_jobs` (`id`, `submission_id FK UNIQUE`, `lab_id FK`, `stage`, `status`, `attempts`, `max_attempts`, `available_at`, `locked_by`, `locked_at`, `last_error`, `payload JSONB`, `created_at`, `updated_at`) — claimed via `FOR UPDATE SKIP LOCKED`.
-11. `idempotency_records` (`student_id FK`, `lab_id FK`, `idempotency_key UUID`, `payload_hash`, `status_code`, `response_headers JSONB`, `response_body JSONB`, `created_at`, `expires_at`, `PRIMARY KEY (student_id, idempotency_key)`).
-12. `constraint_findings`, `model_call_logs`, and `audit_logs` aligned with `docs/contract/checker-output.md` (including all 7 `UnsureReason` values and `PENDING_REVIEW` Syllabus Rule).
+7. `lab_constraints` (`id`, `lab_id FK`, `constraint_code`, `check_type CHECK ('HARD_RULE','LLM','SEMANTIC_LLM')`, `constraint_text`, `ban_patterns JSONB`, `deduction_centipoints INTEGER CHECK 0..1000`, `ordinal`, `UNIQUE (lab_id, constraint_code)`)
+8. `lab_constraint_revisions` (`id`, `lab_id FK`, `constraint_id FK`, `constraint_code`, `previous_text`, `new_text`, `previous_deduction_centipoints`, `new_deduction_centipoints`, `changed_by FK`, `reason`, `created_at`, `CHECK (new_deduction_centipoints <= previous_deduction_centipoints)`) (`FAQ-07`).
+9. `submissions` (`id`, `lab_id FK`, `student_id FK`, `code CHECK <= 65536 bytes`, `pipeline_status`, `overall_verdict`, `compile_output`, `passed_tests`, `total_tests`, `max_time_ms`, `max_memory_kb`, `is_counting`, `idempotency_key UUID`, `checker_status`, `checker_model`, `prompt_version`, `checked_at`, `manual_score_centipoints`, `manual_score_reason`, `manual_scored_by FK`, `manual_scored_at`, `submitted_at`, `judged_at`, `UNIQUE (student_id, lab_id, idempotency_key)`) + partial unique index `uniq_submissions_counting ON submissions (lab_id, student_id) WHERE is_counting = TRUE` (`FAQ-04`).
+10. `submission_test_results` (`submission_id FK`, `ordinal`, `verdict`, `time_ms`, `memory_kb`, `PRIMARY KEY (submission_id, ordinal)`)
+11. `submission_jobs` (`id`, `submission_id FK UNIQUE`, `lab_id FK`, `stage`, `status`, `attempts`, `max_attempts`, `available_at`, `locked_by`, `locked_at`, `last_error`, `payload JSONB`, `created_at`, `updated_at`) — claimed via `FOR UPDATE SKIP LOCKED`.
+12. `idempotency_records` (`student_id FK`, `lab_id FK`, `idempotency_key UUID`, `payload_hash`, `status_code`, `response_headers JSONB`, `response_body JSONB`, `created_at`, `expires_at`, `PRIMARY KEY (student_id, idempotency_key)`).
+13. `constraint_findings` (`id`, `submission_id FK`, `lab_id FK`, `constraint_id FK`, `constraint_code`, composite `FK (lab_id, constraint_code)`, `source`, `verdict`, `unsure_reason` 7 codes, `evidence`, `reason`, `is_sampled_pass`, `review_status`, `ta_decision`, `ta_deduction_centipoints`, `ta_evidence`, `ta_reason`, `reviewed_by`, `reviewed_at`) — enforces non-empty `evidence` on `violation`, synced `review_status`/`ta_decision`, and non-empty `ta_evidence` on `VIOLATION` (`FAQ-09`, `docs/contract/checker-output.md`).
+14. `model_call_logs` (`id`, `submission_id FK`, `lab_id FK`, `call_ordinal`, `request_id`, `model`, `prompt_version`, `constraints`, `sanitized_prompt`, `raw_response`, `input_tokens`, `output_tokens`, `latency_ms`, `estimated_cost_micros`, `status`, `UNIQUE (submission_id, call_ordinal)`, `CHECK (status <> 'OK' OR btrim(request_id) <> '')`, plus partial unique index `uniq_model_call_logs_req_id` when `request_id <> ''`).
+15. `grade_appeals` (`id`, `lab_id FK`, `submission_id FK`, `finding_id FK UNIQUE`, `student_id FK`, `student_reason`, `status`, `ta_decision_reason`, `resolved_by FK`, `created_at`, `resolved_at`) — enforces one appeal per finding and mandatory TA resolution reason (`FAQ-13`, `FAQ-14`).
+16. `audit_logs` (`id`, `lab_id FK`, `submission_id FK`, `actor_id FK`, `action`, `before_state`, `after_state`, `reason`, `created_at`).
 
 ### 6.2 Submission Queue Outbox Payload (Handed off to Task N1 Worker)
-Upon accepting a submission via `POST /labs/{labId}/submissions`, Gateway atomically stores a `PENDING` job into `submission_jobs` containing the payload required by the C++ Sandbox Worker:
+Upon accepting a submission via `POST /labs/{labId}/submissions`, Gateway atomically stores a `PENDING` job into `submission_jobs` containing the payload required by the C++ Sandbox & Checker Worker:
 
 ```json
 {
@@ -359,6 +363,8 @@ Upon accepting a submission via `POST /labs/{labId}/submissions`, Gateway atomic
   "submissionId": "sub_9f8c1b82-412e-4b68-8a8b-18a7c6f0923e",
   "labId": "lab_018f2d5e-7a91-7f3c-b26a-98124d63e001",
   "studentId": "std_23120244",
+  "studentIdentifiers": ["std_23120244", "student1", "student1@leetkob.edu.vn", "Student One"],
+  "statement": "Implement merge sort in C++17 adhering to the constraints below.",
   "code": "#include <iostream>\nint main() { ... }",
   "submittedAt": "2026-11-26T07:30:00.000Z",
   "limits": {

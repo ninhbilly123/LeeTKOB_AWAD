@@ -1,5 +1,7 @@
 # Đánh giá & Kế hoạch Chuẩn hóa Database (`feat/auth_and_labs`) — LeeTKOB
 
+> **Cập nhật đồng bộ Checker & Proposal (2026-11-28):** Schema khởi tạo trong `gateway/migrations/0001_init_pa3_schema.up.sql` & `.down.sql` đã được mở rộng lên **16 bảng chuẩn hóa** theo kế hoạch đã duyệt tại [database-checker-sync-plan.md](database-checker-sync-plan.md) (Phương án 1: bổ sung `lab_constraint_revisions`, `grade_appeals`, sửa `model_call_logs.request_id` cho `TIMEOUT`/`PROVIDER_ERROR`, lưu `checker_model`/`prompt_version`/`checked_at` & `manual_score_*`, thêm `studentIdentifiers` trong `SubmissionJob`, và tách `rebalanceLabPassSample`).
+
 > **Phạm vi đánh giá:** Toàn bộ tầng lưu trữ PostgreSQL, cấu hình môi trường, Docker Compose, cơ chế migration/seed và hợp đồng dữ liệu trên nhánh `origin/feat/auth_and_labs` (tính tới commit `7bdeeca`), đối chiếu trực tiếp với [AGENTS.md](../AGENTS.md), [engineering-rules.md](engineering-rules.md) (Sessions 03–08), [PA3_rubric.md](rubric/PA3_rubric.md), [FAQ.md](proposal/FAQ.md), [proposal-detail.md](proposal/proposal-detail.md), [post-submissions.md](contract/post-submissions.md), [checker-output.md](contract/checker-output.md) và [web-ui-plan.md](web-ui-plan.md).
 
 ---

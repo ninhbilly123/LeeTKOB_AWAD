@@ -428,6 +428,24 @@ Team Members:
 
 ---
 
+## 2026-11-28 — Sync PostgreSQL 16 migrations and Gateway persistence with `checker/`, FAQ, and Proposal (Phạm An Ninh)
+- **Tool**: Antigravity.
+- **Asked for**: Audit `gateway/migrations/0001_init_pa3_schema.{up,down}.sql` and `gateway/src/persistence/` against the merged `checker/` implementation (`models.py`, `hard_rules.py`, `sanitizer.py`, `guardrails.py`, `llm_client.py`, `semantic_checker.py`), `docs/contract/checker-output.md`, `docs/proposal/FAQ.md` (`FAQ-01`..`FAQ-14`), and `docs/proposal/proposal-detail.md` (§2, §4.2), document discrepancies in `docs/database-checker-sync-plan.md`, and apply the approved Option 1 consolidation directly into `0001_init_pa3_schema`.
+- **Kept**:
+  - Updated `gateway/migrations/0001_init_pa3_schema.up.sql` & `.down.sql` to 16 normalized tables with `SET lock_timeout = '2s'` and strict reverse-FK drops.
+  - Fixed a critical `model_call_logs` crash bug where `TIMEOUT` / `PROVIDER_ERROR` calls emit empty `request_id` (`""`) in `checker/src/semantic_checker.py`: replaced `CHECK (btrim(request_id) <> '')` with `CHECK (status <> 'OK' OR btrim(request_id) <> '')`, added `call_ordinal` (`UNIQUE (submission_id, call_ordinal)`), `prompt_version`, `raw_response`, and partial unique index `uniq_model_call_logs_req_id` when `request_id <> ''`.
+  - Preserved top-level `CheckerResult` metadata (`checker_model`, `prompt_version`, `checked_at`) and added manual grade override columns (`manual_score_centipoints`, `manual_score_reason`, `manual_scored_by`, `manual_scored_at`) plus `UNIQUE (student_id, lab_id, idempotency_key)` on `submissions`.
+  - Added DB-level `CHECK` constraints on `constraint_findings` requiring non-empty `evidence` when `verdict = 'violation'` and synchronizing `review_status` with `ta_decision`, added `lab_id` with composite `FOREIGN KEY (lab_id, constraint_code)` and `idx_findings_lab_review`, and aligned `lab_constraints.check_type` with `'HARD_RULE' | 'LLM' | 'SEMANTIC_LLM'`.
+  - Added `classes.invite_code` (`FAQ-01`), `labs.constraints_updated_at` & `lab_constraint_revisions` (`FAQ-07` non-increasing deduction check), and `grade_appeals` (`FAQ-13`/`FAQ-14` `UNIQUE (finding_id)` and mandatory TA resolution reason) with `idx_appeals_lab_status`.
+  - Added `studentIdentifiers` to `SubmissionJob` (`buildSubmissionJob`, `createSubmissionAtomic`, `SubmissionStore`) for `checker/src/sanitizer.py` prompt redaction (`FAQ-06`), and extracted reusable `rebalanceLabPassSample()` called from `recordCheckerResult()`, non-AC `recordJudgeResult()`, and `publishLabAtomic()` (`FAQ-02`, `FAQ-10`).
+  - Synced `docs/contract/auth-and-labs.md` (§6.1–§6.2) and `docs/database-plan.md`, and expanded `gateway/test/database-hardening.spec.ts`.
+- **Changed**:
+  - Kept `idempotency_records` `PRIMARY KEY (student_id, idempotency_key)` unchanged so cross-lab `Idempotency-Key` reuse continues returning `409 idempotency-conflict` per PA#2 regression test `gateway/test/submission-boundaries.contract.spec.ts`.
+- **Rejected**:
+  - Splitting the pre-deployment alignment into a `0002` `ALTER TABLE` migration after the user explicitly approved Option 1 (single clean `0001_init_pa3_schema` before PA#3 server deployment).
+  - Weakening `CHECK (status <> 'OK' OR btrim(request_id) <> '')` to drop `request_id` enforcement on `OK` calls (PA#3 Criterion 4 still requires real provider request IDs for every successful model call).
+- **Validation**:
+  - Ran all four canonical quality gates plus Gateway e2e and NestJS build offline: `npm run lint` (0 errors/warnings across Gateway, Web, Checker), `npm run format:check` (all clean), `npm run typecheck` (`tsc --noEmit` + `mypy` 13 files clean), `npm run test` (Gateway Jest 7 suites / 82 tests, Web Vitest 2 suites / 8 tests, Checker Pytest 26 tests = 116 passed), `npm run test:e2e --workspace=gateway` (1/1 passed), and `npm run build --workspace=gateway` (exit 0).
 ## 2026-11-28 — Add a skill for writing API contracts and contract tests
 
 - **Tool**: Codex.

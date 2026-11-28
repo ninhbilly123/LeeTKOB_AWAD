@@ -53,14 +53,23 @@ export function buildSubmissionJob(
   submission: Submission,
   lab: Lab,
   createdAt: string,
+  studentIdentifiers?: ReadonlyArray<string>,
 ): SubmissionJob {
   const cpuTimeSec = lab.cpuTimeLimitSec ?? DEFAULT_SUBMISSION_LIMITS.cpuTimeSec;
   const memoryMb = lab.memoryLimitMb ?? DEFAULT_SUBMISSION_LIMITS.memoryMb;
+  const normalizedIdentifiers = [
+    ...new Set(
+      [submission.studentId, ...(studentIdentifiers ?? [])]
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0),
+    ),
+  ];
   return {
     id: `job_${randomUUID()}`,
     submissionId: submission.id,
     labId: submission.labId,
     studentId: submission.studentId,
+    studentIdentifiers: normalizedIdentifiers,
     statement: lab.statement ?? '',
     code: submission.code,
     submittedAt: submission.submittedAt,
@@ -84,15 +93,14 @@ export function buildSubmissionJob(
   };
 }
 
-function inferConstraintCheckType(c: LabConstraint): 'HARD_RULE' | 'SEMANTIC_LLM' {
+function inferConstraintCheckType(c: LabConstraint): 'HARD_RULE' | 'LLM' | 'SEMANTIC_LLM' {
   if (c.checkType) {
     return c.checkType;
   }
-  const normalized = c.text.trim().toLowerCase();
-  if (normalized.startsWith('do not use') || normalized.startsWith('do not call')) {
+  if (/^\s*do\s+not\s+(?:use|call)\b/i.test(c.text)) {
     return 'HARD_RULE';
   }
-  return 'SEMANTIC_LLM';
+  return 'LLM';
 }
 
 @Injectable()
@@ -223,11 +231,11 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
     let res: PgQueryResult;
     if (role === 'ADMIN') {
       res = await this.requirePool().query(
-        'SELECT id, code, name, term, created_by FROM classes ORDER BY created_at DESC, id DESC',
+        'SELECT id, code, name, term, invite_code, created_by FROM classes ORDER BY created_at DESC, id DESC',
       );
     } else if (role === 'TA') {
       res = await this.requirePool().query(
-        `SELECT c.id, c.code, c.name, c.term, c.created_by
+        `SELECT c.id, c.code, c.name, c.term, c.invite_code, c.created_by
          FROM classes c
          INNER JOIN class_staff cs ON cs.class_id = c.id
          WHERE cs.ta_id = $1
@@ -236,7 +244,7 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
       );
     } else {
       res = await this.requirePool().query(
-        `SELECT c.id, c.code, c.name, c.term, c.created_by
+        `SELECT c.id, c.code, c.name, c.term, c.invite_code, c.created_by
          FROM classes c
          INNER JOIN class_enrollments ce ON ce.class_id = c.id
          WHERE ce.student_id = $1 AND ce.status = 'ACTIVE'
@@ -249,6 +257,7 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
       code: String(row.code),
       name: String(row.name),
       term: String(row.term),
+      inviteCode: row.invite_code ? String(row.invite_code) : null,
       createdBy: row.created_by ? String(row.created_by) : null,
     }));
   }
@@ -598,6 +607,22 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
         [params.labId, params.studentId],
       );
 
+      const userRes = await client.query<{
+        id: string;
+        username: string;
+        email: string;
+        display_name: string;
+      }>('SELECT id, username, email, display_name FROM users WHERE id = $1', [params.studentId]);
+      const userRow = userRes.rows[0];
+      const studentIdentifiers = userRow
+        ? [
+            String(userRow.id ?? ''),
+            String(userRow.username ?? ''),
+            String(userRow.email ?? ''),
+            String(userRow.display_name ?? ''),
+          ]
+        : [params.studentId];
+
       const submittedAt = new Date(params.receivedAt).toISOString();
       const submission: Submission = {
         id: `sub_${randomUUID()}`,
@@ -624,7 +649,7 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
         Location: `/labs/${params.labId}/submissions/${submission.id}`,
         'Content-Type': 'application/json',
       };
-      const job = buildSubmissionJob(submission, lab, nowIso);
+      const job = buildSubmissionJob(submission, lab, nowIso, studentIdentifiers);
 
       await client.query(
         `INSERT INTO submissions (
@@ -808,6 +833,52 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Rebalances the FAQ-10 10% pass sampling queue across all counting AC submissions in a lab.
+   * Called after recordCheckerResult(), after a non-AC submission supersedes a prior AC one,
+   * and immediately before checking PENDING_REVIEW in publishLabAtomic().
+   */
+  private async rebalanceLabPassSample(
+    client: PgClientLike,
+    labId: string,
+    preferSubmissionId: string | null = null,
+  ): Promise<void> {
+    await client.query(
+      `WITH pass_stats AS (
+         SELECT
+           COUNT(*) AS total_pass,
+           COUNT(*) FILTER (WHERE cf.is_sampled_pass = TRUE) AS sampled_pass
+         FROM constraint_findings cf
+         INNER JOIN submissions s ON s.id = cf.submission_id
+         WHERE s.lab_id = $1
+           AND s.is_counting = TRUE
+           AND s.overall_verdict = 'AC'
+           AND cf.verdict = 'pass'
+       ),
+       needed AS (
+         SELECT GREATEST(0, CEIL(0.10 * total_pass)::int - sampled_pass::int) AS deficit
+         FROM pass_stats
+       ),
+       candidates AS (
+         SELECT cf.id
+         FROM constraint_findings cf
+         INNER JOIN submissions s ON s.id = cf.submission_id
+         WHERE s.lab_id = $1
+           AND s.is_counting = TRUE
+           AND s.overall_verdict = 'AC'
+           AND cf.verdict = 'pass'
+           AND cf.is_sampled_pass = FALSE
+         ORDER BY ($2::text IS NOT NULL AND cf.submission_id = $2) DESC, cf.id ASC
+         LIMIT (SELECT deficit FROM needed)
+       )
+       UPDATE constraint_findings
+       SET is_sampled_pass = TRUE,
+           review_status = CASE WHEN review_status = 'NOT_QUEUED' THEN 'PENDING_REVIEW' ELSE review_status END
+       WHERE id IN (SELECT id FROM candidates)`,
+      [labId, preferSubmissionId],
+    );
+  }
+
   async recordJudgeResult(input: JudgeCompletionInput): Promise<void> {
     const client = await this.requirePool().connect();
     try {
@@ -816,7 +887,7 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
       const totalTests = input.testResults.length;
       const nextCheckerStatus = input.overallVerdict === 'AC' ? 'PENDING' : 'NOT_APPLICABLE';
 
-      await client.query(
+      const subRes = await client.query<{ lab_id: string }>(
         `UPDATE submissions
          SET pipeline_status = 'COMPLETED',
              overall_verdict = $2,
@@ -827,7 +898,8 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
              max_memory_kb = $7,
              checker_status = $8,
              judged_at = $9
-         WHERE id = $1`,
+         WHERE id = $1
+         RETURNING lab_id`,
         [
           input.submissionId,
           input.overallVerdict,
@@ -872,6 +944,10 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
            WHERE submission_id = $1`,
           [input.submissionId],
         );
+        const labId = subRes.rows[0]?.lab_id ? String(subRes.rows[0].lab_id) : null;
+        if (labId) {
+          await this.rebalanceLabPassSample(client, labId, null);
+        }
       }
 
       await client.query('COMMIT');
@@ -910,10 +986,12 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
 
         await client.query(
           `INSERT INTO constraint_findings (
-             id, submission_id, constraint_id, constraint_code, source, verdict,
+             id, submission_id, lab_id, constraint_id, constraint_code, source, verdict,
              unsure_reason, evidence, reason, is_sampled_pass, review_status
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11)
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12)
            ON CONFLICT (submission_id, constraint_id) DO UPDATE SET
+             lab_id = EXCLUDED.lab_id,
+             constraint_code = EXCLUDED.constraint_code,
              source = EXCLUDED.source,
              verdict = EXCLUDED.verdict,
              unsure_reason = EXCLUDED.unsure_reason,
@@ -924,6 +1002,7 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
           [
             `fnd_${randomUUID()}`,
             input.submissionId,
+            input.labId,
             constraintId,
             finding.constraintCode,
             finding.source,
@@ -937,22 +1016,39 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
         );
       }
 
-      for (const log of input.callLogs) {
+      for (let idx = 0; idx < input.callLogs.length; idx += 1) {
+        const log = input.callLogs[idx];
+        const callOrdinal = log.callOrdinal ?? idx + 1;
+        const promptVersion = log.promptVersion ?? input.promptVersion ?? 'v1';
         await client.query(
           `INSERT INTO model_call_logs (
-             id, submission_id, lab_id, request_id, model, constraints,
-             sanitized_prompt, input_tokens, output_tokens, latency_ms,
-             estimated_cost_micros, status
-           ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12)
-           ON CONFLICT (submission_id, request_id) DO NOTHING`,
+             id, submission_id, lab_id, call_ordinal, request_id, model, prompt_version,
+             constraints, sanitized_prompt, raw_response, input_tokens, output_tokens,
+             latency_ms, estimated_cost_micros, status
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13, $14, $15)
+           ON CONFLICT (submission_id, call_ordinal) DO UPDATE SET
+             request_id = EXCLUDED.request_id,
+             model = EXCLUDED.model,
+             prompt_version = EXCLUDED.prompt_version,
+             constraints = EXCLUDED.constraints,
+             sanitized_prompt = EXCLUDED.sanitized_prompt,
+             raw_response = EXCLUDED.raw_response,
+             input_tokens = EXCLUDED.input_tokens,
+             output_tokens = EXCLUDED.output_tokens,
+             latency_ms = EXCLUDED.latency_ms,
+             estimated_cost_micros = EXCLUDED.estimated_cost_micros,
+             status = EXCLUDED.status`,
           [
             `mcl_${randomUUID()}`,
             input.submissionId,
             input.labId,
-            log.requestId,
+            callOrdinal,
+            log.requestId ?? '',
             log.model,
+            promptVersion,
             JSON.stringify(log.constraints),
             log.sanitizedPrompt,
+            log.rawResponse ?? null,
             log.inputTokens,
             log.outputTokens,
             log.latencyMs,
@@ -962,42 +1058,22 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
         );
       }
 
-      // Enforce FAQ-10 10% pass sampling across counting AC submissions in the lab:
-      // ceil(0.10 * totalPassFindings) must be marked is_sampled_pass = TRUE & PENDING_REVIEW.
-      await client.query(
-        `WITH pass_stats AS (
-           SELECT
-             COUNT(*) AS total_pass,
-             COUNT(*) FILTER (WHERE cf.is_sampled_pass = TRUE) AS sampled_pass
-           FROM constraint_findings cf
-           INNER JOIN submissions s ON s.id = cf.submission_id
-           WHERE s.lab_id = $1 AND s.is_counting = TRUE AND cf.verdict = 'pass'
-         ),
-         needed AS (
-           SELECT GREATEST(0, CEIL(0.10 * total_pass)::int - sampled_pass::int) AS deficit
-           FROM pass_stats
-         ),
-         candidates AS (
-           SELECT cf.id
-           FROM constraint_findings cf
-           INNER JOIN submissions s ON s.id = cf.submission_id
-           WHERE s.lab_id = $1
-             AND s.is_counting = TRUE
-             AND cf.verdict = 'pass'
-             AND cf.is_sampled_pass = FALSE
-           ORDER BY cf.submission_id = $2 DESC, cf.id ASC
-           LIMIT (SELECT deficit FROM needed)
-         )
-         UPDATE constraint_findings
-         SET is_sampled_pass = TRUE,
-             review_status = CASE WHEN review_status = 'NOT_QUEUED' THEN 'PENDING_REVIEW' ELSE review_status END
-         WHERE id IN (SELECT id FROM candidates)`,
-        [input.labId, input.submissionId],
-      );
+      await this.rebalanceLabPassSample(client, input.labId, input.submissionId);
 
-      await client.query("UPDATE submissions SET checker_status = 'COMPLETED' WHERE id = $1", [
-        input.submissionId,
-      ]);
+      await client.query(
+        `UPDATE submissions
+         SET checker_status = 'COMPLETED',
+             checker_model = $2,
+             prompt_version = $3,
+             checked_at = $4
+         WHERE id = $1`,
+        [
+          input.submissionId,
+          input.model ?? null,
+          input.promptVersion ?? null,
+          input.checkedAt ?? new Date().toISOString(),
+        ],
+      );
       await client.query(
         "UPDATE submission_jobs SET status = 'DONE', locked_by = NULL, locked_at = NULL, updated_at = NOW() WHERE submission_id = $1",
         [input.submissionId],
@@ -1160,6 +1236,9 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
           'Cannot publish grades before the lab deadline has passed (FAQ-12).',
         );
       }
+
+      // Ensure FAQ-10 10% pass sampling is balanced across counting AC submissions before publish
+      await this.rebalanceLabPassSample(client, labId, null);
 
       const pendingRes = await client.query<{ pending_count: string }>(
         `SELECT COUNT(*) AS pending_count
