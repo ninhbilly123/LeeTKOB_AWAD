@@ -624,6 +624,7 @@ Team Members:
 ---
 
 ## 2026-11-28 — Align All HTTP API Contracts with `write-api-contract` Skill (Phạm An Ninh)
+
 - **Tool**: Antigravity.
 - **Asked for**: Audit all implemented HTTP endpoints across `gateway/` and `checker/` against `docs/contract/` and `.agents/skills/write-api-contract/SKILL.md`, then standardize `docs/contract/auth-and-labs.md` and `docs/contract/post-submissions.md` to the exact 5-section IA#3 format with complete endpoint specifications.
 - **Kept**:
@@ -636,3 +637,26 @@ Team Members:
   - Altering any existing RFC 9457 error URI (`deadline-passed`, `idempotency-conflict`, `internal-server-error`) or modifying application/test code in this documentation-only alignment PR.
 - **Validation**:
   - Audited all 17 Gateway controller routes + 2 Checker internal HTTP routes against all 5 files in `docs/contract/` (19/19 routes covered). Documentation-only change; verified `git diff` and internal markdown anchors.
+
+---
+
+## 2026-11-28 — Complete HTTP Contract Test Coverage Across All 19 Endpoints (Phạm An Ninh)
+
+- **Tool**: Antigravity.
+- **Asked for**: Audit all contract tests across `gateway/test/` and `checker/tests/` against `docs/contract/` (all 17 Gateway routes + 2 Checker internal routes) and add missing HTTP contract tests so 100% of documented endpoints, status codes, RFC 9457 errors, pagination, role/IDOR boundaries, and zero-side-effect refusals are covered without modifying or weakening any existing test.
+- **Kept**:
+  - Created `gateway/test/contracts-completeness.spec.ts` (6 test blocks) covering all previously untested endpoint branches:
+    - `GET /health`: `503 Service Unavailable` with RFC 9457 `application/problem+json` when DB health probe fails.
+    - `GET /auth/me`: `401 Unauthorized` on missing/invalid bearer token.
+    - `GET /classes`: `STUDENT` scoped listing, unenrolled student empty list (`{ items: [], nextCursor: null }`), and `400 Bad Request` on invalid `limit` (`0`, `101`, `abc`).
+    - `POST /classes`: case-insensitive `409 Conflict` on duplicate class code, `400 Bad Request` on invalid payload, `403 Forbidden` for `STUDENT`, `415 Unsupported Media Type`, and zero-side-effect verification after all refusals.
+    - `GET /classes/:classId/labs` & `POST /classes/:classId/labs`: cursor pagination, student hidden test-case redaction, `submissionCount`/`pendingReviewCount`, `400` (`FAQ-05` bounds & `openedAt >= deadline`), `403` (`STUDENT`/`ADMIN`/unassigned `TA`), `404`, `415`, and zero-side-effect verification.
+    - `GET /labs` & `POST /labs`: `401`, `415`, class scoping.
+    - `GET /labs/:labId/submissions`, `GET /submissions/:id`, `GET /labs/:labId/review-queue`, `GET /labs/:labId/submissions/:submissionId/review`, `PATCH .../findings/:findingId`, `POST /labs/:labId/publish`: `STUDENT`/`TA` ownership & cross-class `403`, `scope=all`, `400`, `401`, `404`, `415`.
+  - Added `test_unknown_routes_return_404` to `checker/tests/test_server.py` verifying `404` on unknown `GET`/`POST` paths on the Checker HTTP server.
+- **Changed**:
+  - Updated the `POST /classes` duplicate-code test in `gateway/test/contracts-completeness.spec.ts` to derive the lowercase duplicate code dynamically from `classesStore.listClassesForUserAsync('usr_admin_01', 'ADMIN')[0].code` (`csc10002-24clc1`) rather than hardcoding `cs101`, matching `DEMO_CLASSES` seed data.
+- **Rejected**:
+  - Modifying or relaxing any existing contract test assertion across `gateway/test/*.spec.ts` or `checker/tests/test_server.py`.
+- **Validation**:
+  - Ran all four canonical root quality gates + Gateway e2e: `npm run lint` (PASSED), `npm run format:check` (PASSED), `npm run typecheck` (PASSED — TS + `mypy` 16 files), `npm run test` (**162/162 passed**: Gateway Jest 10 suites / 98 tests, Web Vitest 2 suites / 11 tests, Judge Jest 4 suites / 19 tests, Checker Pytest 34 tests), and `npm run test:e2e --workspace=gateway` (1/1 passed).

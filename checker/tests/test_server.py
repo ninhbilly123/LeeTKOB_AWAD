@@ -163,3 +163,19 @@ def test_post_check_rejects_invalid_payload_with_400() -> None:
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+def test_unknown_routes_return_404() -> None:
+    server, thread, base_url = _start_ephemeral_server(model_off=True)
+    try:
+        get_status, get_body = _http_json(f"{base_url}/unknown")
+        assert get_status == 404
+        assert "error" in get_body
+
+        post_status, post_body = _http_json(f"{base_url}/unknown", method="POST", payload={})
+        assert post_status == 404
+        assert "error" in post_body
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
