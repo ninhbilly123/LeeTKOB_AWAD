@@ -5,6 +5,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY gateway/package.json ./gateway/package.json
 COPY web/package.json ./web/package.json
+COPY judge/package.json ./judge/package.json
 RUN npm ci --workspace=gateway --include-workspace-root=false
 
 COPY gateway ./gateway
@@ -18,6 +19,7 @@ ENV NODE_ENV=production
 COPY package.json package-lock.json ./
 COPY gateway/package.json ./gateway/package.json
 COPY web/package.json ./web/package.json
+COPY judge/package.json ./judge/package.json
 RUN npm ci --omit=dev --workspace=gateway --include-workspace-root=false
 
 COPY --from=builder /app/gateway/dist ./gateway/dist

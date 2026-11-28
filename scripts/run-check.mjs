@@ -14,21 +14,25 @@ const actionMap = {
   lint: [
     { name: 'Gateway ESLint', command: npmCmd, args: ['run', 'lint', '--workspace=gateway'] },
     { name: 'Web ESLint', command: npmCmd, args: ['run', 'lint', '--workspace=web'] },
+    { name: 'Judge ESLint', command: npmCmd, args: ['run', 'lint', '--workspace=judge'] },
     { name: 'Checker Ruff Lint', command: pythonCmd, args: ['-m', 'ruff', 'check', 'checker'] },
   ],
   'format:check': [
     { name: 'Gateway Prettier', command: npmCmd, args: ['run', 'format:check', '--workspace=gateway'] },
     { name: 'Web Prettier', command: npmCmd, args: ['run', 'format:check', '--workspace=web'] },
+    { name: 'Judge Prettier', command: npmCmd, args: ['run', 'format:check', '--workspace=judge'] },
     { name: 'Checker Ruff Format Check', command: pythonCmd, args: ['-m', 'ruff', 'format', '--check', 'checker'] },
   ],
   typecheck: [
     { name: 'Gateway Typecheck (tsc)', command: npmCmd, args: ['run', 'typecheck', '--workspace=gateway'] },
     { name: 'Web Typecheck (tsc)', command: npmCmd, args: ['run', 'typecheck', '--workspace=web'] },
+    { name: 'Judge Typecheck (tsc)', command: npmCmd, args: ['run', 'typecheck', '--workspace=judge'] },
     { name: 'Checker Typecheck (mypy)', command: pythonCmd, args: ['-m', 'mypy', 'checker/src', 'checker/tests'] },
   ],
   test: [
     { name: 'Gateway Tests (jest)', command: npmCmd, args: ['run', 'test', '--workspace=gateway'] },
     { name: 'Web Tests (vitest)', command: npmCmd, args: ['run', 'test', '--workspace=web'] },
+    { name: 'Judge Tests (jest)', command: npmCmd, args: ['run', 'test', '--workspace=judge'] },
     { name: 'Checker Tests (pytest)', command: pythonCmd, args: ['-m', 'pytest', 'checker'] },
   ],
 };

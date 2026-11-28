@@ -446,6 +446,31 @@ Team Members:
   - Weakening `CHECK (status <> 'OK' OR btrim(request_id) <> '')` to drop `request_id` enforcement on `OK` calls (PA#3 Criterion 4 still requires real provider request IDs for every successful model call).
 - **Validation**:
   - Ran all four canonical quality gates plus Gateway e2e and NestJS build offline: `npm run lint` (0 errors/warnings across Gateway, Web, Checker), `npm run format:check` (all clean), `npm run typecheck` (`tsc --noEmit` + `mypy` 13 files clean), `npm run test` (Gateway Jest 7 suites / 82 tests, Web Vitest 2 suites / 8 tests, Checker Pytest 26 tests = 116 passed), `npm run test:e2e --workspace=gateway` (1/1 passed), and `npm run build --workspace=gateway` (exit 0).
+
+---
+
+## 2026-11-28 — Implement Task N1: Durable PostgreSQL Queue, Standalone Judge Worker & Internal Checker HTTP Bridge (Phạm An Ninh)
+- **Tool**: Antigravity.
+- **Asked for**: Implement Task N1 (`pa3-team-tasks.md`) on branch `feat/judge-queue-worker`: agree and document the internal job/result contract, build a standalone `judge/` worker consuming the PostgreSQL durable queue (`submission_jobs` via `FOR UPDATE SKIP LOCKED` + `LISTEN/NOTIFY` + stale-lease recovery), store overall and per-test verdicts, trigger the isolated internal `checker` service for `AC` submissions only, guarantee single-verdict/finding idempotency on redelivery, and provide stop → submit → restart verification tests and script.
+- **Kept**:
+  - Added internal contract [docs/contract/queue-and-judge.md](docs/contract/queue-and-judge.md) aligning Gateway, PostgreSQL 16 durable queue, `judge/`, and `checker/`.
+  - Added stdlib HTTP server `checker/src/server.py` (`GET /health`, `POST /check` delegating to `check_submission()`) and 4 offline contract tests in `checker/tests/test_server.py` (0 new Python packages; CLI `python -m src` preserved).
+  - Updated `gateway/src/persistence/postgres.store.ts` to emit `SELECT pg_notify('submission_jobs_ready', ...)` on enqueue and `AC` → `CHECK` stage promotion, and added `countLabModelCalls(labId)` with test coverage in `gateway/test/persistence-and-queue.spec.ts`.
+  - Built standalone Node.js 22 + TypeScript workspace `judge/` (0 new npm packages — reusing pinned `pg`, `typescript`, `eslint`, `prettier`, `jest`, `ts-jest`):
+    - `judge/src/config.ts`: startup config validation that refuses to start if `GEMINI_API_KEY`, `MODEL_API_KEY`, or `GOOGLE_API_KEY` is present in `judge-worker`'s environment (PA#3 Criterion 2 secret isolation).
+    - `judge/src/sandbox/` (`runner.interface.ts`, `output-compare.ts`, `process-runner.ts`): pluggable `SandboxRunner` boundary for Task N2, `FAQ-05` output normalization, temporary path scrubbing in `compile_output`, and `FAQ-04` overall verdict calculation.
+    - `judge/src/checker/checker-http.client.ts`: HTTP client calling internal `checker` with timeout/schema validation and fail-safe degradation to `unsure` (`TIMEOUT` / `PROVIDER_ERROR` / `SCHEMA_INVALID` per `FAQ-09`).
+    - `judge/src/queue/job-store.ts` & `worker.ts` & `main.ts`: 3-phase short-transaction `PostgresJobStore` (`FOR UPDATE SKIP LOCKED`, `LISTEN submission_jobs_ready`, `ON CONFLICT DO UPDATE` idempotency, `rebalanceLabPassSample`), `InMemoryJobStore`, and `JudgeWorker` with graceful `SIGTERM`/`SIGINT` drain and lab LLM call cap (`MAX_LLM_CALLS_PER_LAB`).
+    - 14 offline Jest tests across `judge/test/{output-compare,checker-client,worker-lifecycle}.spec.ts` proving stop → submit → restart durability, non-AC checker bypass, double-delivery single-verdict/finding idempotency, lab LLM call cap, and secret isolation.
+  - Wired `judge` into root `package.json` workspaces, `package-lock.json`, `scripts/run-check.mjs` (all 4 canonical gates), `judge/Dockerfile`, `gateway/Dockerfile`, `docker-compose.yml` (`checker` + `judge-worker` with zero LLM keys in `judge-worker`), `.env.example` (empty variable names only), `README.md`, and `scripts/verify-n1-worker.mjs`.
+- **Changed**:
+  - Updated `gateway/Dockerfile` to copy `judge/package.json` alongside `gateway/package.json` and `web/package.json` so workspace `npm ci` remains in sync with the root `package-lock.json`.
+  - Formatted workspace TypeScript files using each workspace's `.prettierrc` (`npx prettier --config <ws>/.prettierrc --write`) after root-level formatting flagged LF/config drift in `gateway/test/persistence-and-queue.spec.ts`.
+- **Rejected**:
+  - Passing `GEMINI_API_KEY` into `judge-worker` or calling Gemini directly from `judge/` (violates Criterion 2 secret isolation; isolated behind internal `checker/src/server.py` instead).
+  - Adding an external message broker container (RabbitMQ) or new npm/Python packages when PostgreSQL 16 `FOR UPDATE SKIP LOCKED` + `LISTEN/NOTIFY` provides transactional outbox durability with zero dual-write risk and zero extra RAM.
+- **Validation**:
+  - Ran all four canonical root commands plus builds and e2e offline: `npm run lint` (Gateway, Web, Judge ESLint + Checker Ruff — 0 errors/warnings), `npm run format:check` (Gateway, Web, Judge Prettier + Checker Ruff Format 15 files clean), `npm run typecheck` (`tsc --noEmit` on Gateway/Web/Judge + `mypy --strict` on 15 Checker files clean), `npm run test` (Gateway Jest 7 suites / 82 tests, Web Vitest 2 suites / 8 tests, Judge Jest 3 suites / 14 tests, Checker Pytest 30 tests = **134 passed**), `npm run build --workspace=judge`, `npm run build --workspace=gateway`, and `npm run test:e2e --workspace=gateway` (1/1 passed). Live Docker Compose verification (`node scripts/verify-n1-worker.mjs`) is ready to run whenever Docker Desktop is started.
 ## 2026-11-28 — Add a skill for writing API contracts and contract tests
 
 - **Tool**: Codex.

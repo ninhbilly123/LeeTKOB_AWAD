@@ -1,0 +1,29 @@
+{
+  "name": "judge",
+  "version": "0.0.1",
+  "private": true,
+  "description": "LeeTKOB Standalone Judge & Checker Queue Worker (Node.js 22 + TypeScript)",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "lint": "eslint \"{src,test}/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",
+    "typecheck": "tsc --noEmit",
+    "test": "jest"
+  },
+  "dependencies": {
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.23.1",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^8.57.0",
+    "jest": "^29.7.0",
+    "prettier": "^3.4.0",
+    "ts-jest": "^29.2.0",
+    "typescript": "~5.7.0"
+  }
+}
