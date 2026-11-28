@@ -44,6 +44,7 @@ export interface ClassRecord {
   code: string;
   name: string;
   term: string;
+  inviteCode?: string | null;
   createdBy: string | null;
 }
 
@@ -60,7 +61,7 @@ export interface LabTestCase {
   isHidden: boolean;
 }
 
-export type LabConstraintCheckType = 'HARD_RULE' | 'SEMANTIC_LLM';
+export type LabConstraintCheckType = 'HARD_RULE' | 'LLM' | 'SEMANTIC_LLM';
 
 export interface LabConstraint {
   id: string;
@@ -83,6 +84,7 @@ export interface Lab {
   memoryLimitMb?: number; // 64–512 MB per FAQ-05 (default 256)
   maxPayloadSize: number; // fixed 65,536 bytes (64 KB) per FAQ-05
   isActive: boolean;
+  constraintsUpdatedAt?: string;
   testCases?: LabTestCase[];
   constraints?: LabConstraint[];
   publishedAt?: string | null;
@@ -117,6 +119,13 @@ export interface Submission {
   maxTimeMs?: number | null;
   maxMemoryKb?: number | null;
   checkerStatus?: CheckerStatus;
+  checkerModel?: string | null;
+  promptVersion?: string | null;
+  checkedAt?: string | null;
+  manualScore?: number | null;
+  manualScoreReason?: string | null;
+  manualScoredBy?: string | null;
+  manualScoredAt?: string | null;
   isCounting?: boolean;
   submittedAt: string; // ISO 8601 string
   judgedAt?: string | null;
@@ -152,6 +161,8 @@ export interface SubmissionJob {
   submissionId: string;
   labId: string;
   studentId: string;
+  /** Student identity strings passed to checker/src/sanitizer.py for prompt redaction (FAQ-06). */
+  studentIdentifiers?: string[];
   statement?: string;
   code: string;
   submittedAt: string;
@@ -189,6 +200,7 @@ export interface EvidenceLine {
 export interface ConstraintFindingRecord {
   id: string;
   submissionId: string;
+  labId?: string;
   constraintId: string;
   constraintCode: string;
   source: FindingSource;
@@ -210,10 +222,13 @@ export type ModelCallStatus =
   'OK' | 'SCHEMA_INVALID' | 'EVIDENCE_MISMATCH' | 'TIMEOUT' | 'PROVIDER_ERROR';
 
 export interface ModelCallLogInput {
+  callOrdinal?: number;
   requestId: string;
   model: string;
+  promptVersion?: string;
   constraints: string[];
   sanitizedPrompt: string;
+  rawResponse?: string | null;
   inputTokens: number;
   outputTokens: number;
   latencyMs: number;
@@ -244,6 +259,9 @@ export interface CheckerFindingInput {
 export interface CheckerCompletionInput {
   submissionId: string;
   labId: string;
+  model?: string | null;
+  promptVersion?: string | null;
+  checkedAt?: string;
   findings: CheckerFindingInput[];
   callLogs: ModelCallLogInput[];
 }

@@ -87,7 +87,7 @@ export function mapConstraintRow(row: Record<string, unknown>): LabConstraint {
   return {
     id: String(row.constraint_code ?? row.id),
     code: String(row.constraint_code ?? row.id),
-    checkType: (row.check_type as LabConstraintCheckType | undefined) ?? 'SEMANTIC_LLM',
+    checkType: (row.check_type as LabConstraintCheckType | undefined) ?? 'LLM',
     text: String(row.constraint_text ?? ''),
     banPatterns: parseJsonColumn<string[]>(row.ban_patterns, []),
     deduction: centipointsToPoints(centipoints),
@@ -111,6 +111,9 @@ export function mapLabRow(
     memoryLimitMb: Number(row.memory_limit_mb ?? 256),
     maxPayloadSize: Number(row.max_payload_bytes ?? row.max_payload_size ?? 65536),
     isActive: Boolean(row.is_active),
+    constraintsUpdatedAt: row.constraints_updated_at
+      ? toIsoString(row.constraints_updated_at)
+      : undefined,
     testCases,
     constraints,
     publishedAt,
@@ -140,6 +143,25 @@ export function mapSubmissionRow(row: Record<string, unknown>): Submission {
         ? Number(row.max_memory_kb)
         : null,
     checkerStatus: (row.checker_status as CheckerStatus | undefined) ?? 'NOT_APPLICABLE',
+    checkerModel:
+      row.checker_model !== null && row.checker_model !== undefined
+        ? String(row.checker_model)
+        : null,
+    promptVersion:
+      row.prompt_version !== null && row.prompt_version !== undefined
+        ? String(row.prompt_version)
+        : null,
+    checkedAt: row.checked_at ? toIsoString(row.checked_at) : null,
+    manualScore:
+      row.manual_score_centipoints !== null && row.manual_score_centipoints !== undefined
+        ? centipointsToPoints(Number(row.manual_score_centipoints))
+        : null,
+    manualScoreReason:
+      row.manual_score_reason !== null && row.manual_score_reason !== undefined
+        ? String(row.manual_score_reason)
+        : null,
+    manualScoredBy: row.manual_scored_by ? String(row.manual_scored_by) : null,
+    manualScoredAt: row.manual_scored_at ? toIsoString(row.manual_scored_at) : null,
     isCounting: Boolean(row.is_counting),
     submittedAt: toIsoString(row.submitted_at),
     judgedAt: row.judged_at ? toIsoString(row.judged_at) : null,
@@ -151,6 +173,7 @@ export function mapConstraintFindingRow(row: Record<string, unknown>): Constrain
   return {
     id: String(row.id),
     submissionId: String(row.submission_id),
+    labId: row.lab_id ? String(row.lab_id) : undefined,
     constraintId: String(row.constraint_id),
     constraintCode: String(row.constraint_code),
     source: String(row.source) as FindingSource,
