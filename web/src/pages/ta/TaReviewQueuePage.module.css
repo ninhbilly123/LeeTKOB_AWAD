@@ -1,0 +1,71 @@
+.workbench {
+  display: grid;
+  grid-template-columns: 290px minmax(380px, 1fr) 360px;
+  gap: 1rem;
+  align-items: start;
+}
+
+.queueList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.queueBtn {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  padding: 0.7rem 0.8rem;
+  cursor: pointer;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.queueBtn:hover {
+  background: var(--bg-subtle);
+}
+
+.queueBtnActive {
+  border-color: var(--brand-600);
+  background: var(--brand-soft);
+}
+
+.evidenceBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--status-warn-border);
+  background: var(--status-warn-bg);
+  color: var(--status-warn-text);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.evidenceBtn:hover {
+  filter: brightness(0.96);
+}
+
+.mobileTabs {
+  display: none;
+}
+
+@media (max-width: 1120px) {
+  .workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .mobileTabs {
+    display: flex;
+  }
+
+  .hiddenMobile {
+    display: none;
+  }
+}

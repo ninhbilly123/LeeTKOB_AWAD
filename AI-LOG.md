@@ -391,6 +391,25 @@ Team Members:
 
 ---
 
+## 2026-11-26 — Design and implement PA#3 Frontend UI (`web/`) and plan doc (`docs/web-ui-plan.md`) (Phạm An Ninh)
+- **Tool**: Antigravity.
+- **Asked for**: Audit `gateway/`, `web/`, proposal, FAQ, and PA#3 rubric; document the frontend UI plan in `docs/web-ui-plan.md` strictly following the documentation rules (`Brief > FAQ > Proposal > engineering-rules.md`); and build the `web/` frontend covering Admin, TA, and Student PA#3 flows with a shared `MockApiClient` / `HttpApiClient` interface preserving FAQ privacy boundaries.
+- **Kept**:
+  - Created `docs/web-ui-plan.md` mapping all roles/screens across PA#3–PA#5, wireframes + 5 UI states, Modern Web Guidance principles, and 9 backend API alignment items.
+  - Restored Vite 5 entry files (`web/index.html`, `web/src/main.tsx`), fixed `web/package.json` build script (`tsc --noEmit && vite build`), and configured `/api` dev proxy in `web/vite.config.ts` with zero new npm packages.
+  - Implemented shared TypeScript domain types (`web/src/types/`), unified `LeeTkobApiClient` interface (`MockApiClient` with 5 PA#3 demo accounts + `HttpApiClient` with Bearer JWT, `Idempotency-Key`, and RFC 9457 parsing), role/class-ownership routing, `SafeMarkdown` (no `dangerouslySetInnerHTML`), `CodeViewer` preserving exact 1-based line numbers, Admin classes page, TA 4-step lab creation page, Student C++17 submission/tracking page, and TA 3-column Review Queue page.
+  - Enforced `FAQ-02` and `FAQ-08` / Syllabus Rule in both TypeScript types and `MockApiClient`: before Publish, Student endpoints strip all test I/O and all constraint verdicts/evidence/`unsureReason`/deductions, and TA LLM flags have no "Approve All" action.
+  - Updated `README.md` and `.env.example` (empty variable names only, zero secrets).
+- **Changed**:
+  - Separated `SubmissionPipelineStatus` (`QUEUED | JUDGING | COMPLETED | JUDGE_ERROR`) from `JudgeVerdict` (`AC | WA | TLE | MLE | RE | CE`), added `errors[]` RFC 9457 field validation support, and added cursor pagination (`PaginatedResponse<T>`) per documentation rules rather than mirroring legacy drifted types in `gateway/src/submissions/submissions.types.ts`.
+  - Tightened three overly broad Testing Library queries in `web/src/App.spec.tsx` (`getByRole('textbox', ...)`, `await waitFor(...)` for async TA detail panel, exact `getByText('sub_101')`) without weakening any privacy or authorization assertions.
+- **Rejected**:
+  - Adding third-party routing/Markdown npm packages (Tier-2) when zero-dependency History API routing and React-node Markdown rendering satisfy PA#3 cleanly without XSS risk.
+  - Exposing hidden test cases or pre-publish checker verdicts in Student mock payloads or hiding them only with CSS.
+- **Validation**: Ran all four canonical root commands (`npm run lint`, `npm run format:check`, `npm run typecheck`, `npm run test` covering `gateway` 37 Jest tests, `web` 8 Vitest tests including negative privacy assertions, and `checker` Pytest) plus `npm run build --workspace=web` offline on branch `feat/web-pa3-ui`.
+
+---
+
 ## 2026-11-27 — Audit and harden PostgreSQL schema, migrations, worker outbox, and Docker packaging (`feat/database-hardening`) (Phạm An Ninh)
 - **Tool**: Antigravity.
 - **Asked for**: Review the database design and configuration on `origin/feat/auth_and_labs` against project docs/rules (`AGENTS.md`, `docs/engineering-rules.md`, `PA3_rubric.md`, `FAQ.md`, `docs/contract/checker-output.md`), document findings and a remediation plan in `docs/database-plan.md`, and implement the approved fixes on a new branch.
