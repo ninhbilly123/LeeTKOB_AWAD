@@ -19,8 +19,8 @@ export class AuthService {
     @Inject(JWT_VERIFICATION_SECRET) private readonly secret: string,
   ) {}
 
-  async login(username: string, password: string): Promise<LoginResponse> {
-    const user = await this.authStore.findUserByUsernameAsync(username);
+  async login(identifier: string, password: string): Promise<LoginResponse> {
+    const user = await this.authStore.findUserByIdentifierAsync(identifier);
     if (!user || !verifyPassword(password, user.passwordHash)) {
       throw problemException(HttpStatus.UNAUTHORIZED, 'Invalid username or password.');
     }
@@ -43,6 +43,29 @@ export class AuthService {
         role: user.role,
         classIds,
       },
+    };
+  }
+
+  async getCurrentUser(userId: string): Promise<UserProfile> {
+    const user = await this.authStore.findUserByIdAsync(userId);
+    if (!user) {
+      throw problemException(
+        HttpStatus.UNAUTHORIZED,
+        'Authentication token is missing, invalid, or has expired.',
+      );
+    }
+    const classIds =
+      user.role === 'STUDENT'
+        ? await this.authStore.activeClassesAsync(user.id)
+        : [...user.classIds];
+
+    return {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      displayName: user.displayName,
+      role: user.role,
+      classIds,
     };
   }
 }

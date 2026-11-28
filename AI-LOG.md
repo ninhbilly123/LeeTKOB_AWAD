@@ -528,3 +528,23 @@ Team Members:
 - **Changed**: Added the five-section HTTP outline, a separate path for internal payloads, and a test workflow that checks both responses and persisted outcomes. Registered the skill in the repo catalog and AGENTS.md.
 - **Rejected**: Copying the IA#3 menu service's status codes and replay headers into LeeTKOB. These details belong to each endpoint's approved contract.
 - **Validation**: The skill-creator validator passed. Verified the five IA#3 sections, ten links, and the submission examples against the existing contract and test sources. Application tests were skipped for this documentation-only change.
+
+---
+
+## 2026-11-28 — Complete Task D1: Sync Web HTTP Client with Gateway Auth, Classes, Labs & Trackable Submissions (Phạm An Ninh)
+- **Tool**: Antigravity.
+- **Asked for**: Audit Task D1 (`pa3-team-tasks.md`) against current code/docs and complete the remaining ~30% so `web/` (`VITE_API_MODE=http`) works end-to-end against `gateway/` (on top of PR #22 `feat/review_and_results`), including demo login by `username` or `email`, `GET /auth/me`, `GET/POST /classes`, `GET/POST /classes/:classId/labs`, `GET /submissions/:submissionId`, CORS headers, official `sort-merge` acceptance test, and contract updates per `write-api-contract`.
+- **Kept**:
+  - Updated [docs/contract/auth-and-labs.md](docs/contract/auth-and-labs.md) following `.agents/skills/write-api-contract/SKILL.md` to specify `POST /auth/login` (`username` or `email`), `GET /auth/me`, `GET/POST /classes`, `GET/POST /classes/{classId}/labs`, cursor pagination, and role visibility while preserving 100% backward compatibility for `POST /labs`, `GET /labs`, and `GET /labs/{labId}`.
+  - Added `GET /auth/me`, email-or-username login in `gateway/src/auth/`, `ClassesModule` (`GET /classes`, `POST /classes`, `GET /classes/:classId/labs`, `POST /classes/:classId/labs` with opaque Base64URL cursor pagination and PostgreSQL summary queries `listClassSummariesForUser` + `createClass`), `GET /submissions/:submissionId` delegating to D2's student/TA visibility services, and configurable CORS (`CORS_ORIGINS`) exposing `Location` and `Idempotency-Key` in `gateway/src/configure-app.ts` and `.env.example`.
+  - Updated `web/src/api/http-client.ts` (full two-way DTO adapter for auth, classes, labs, submissions, and TA review queue), `web/src/pages/LoginPage.tsx` (accepting email or username), `web/src/pages/ta/TaCreateLabPage.tsx` (aligning default `C1`/`C2` constraint wording with `checker/src/hard_rules.py` backtick convention and deductions `3`/`4`), and added `web/src/api/http-client.spec.ts` (3 Vitest tests).
+  - Added `gateway/test/d1-acceptance.contract.spec.ts` (3 Jest tests) verifying official `leetkob-eval/problems/sort-merge` creation, trackable `Location` + `GET /submissions/:id`, identical `Idempotency-Key` replay, cross-class TA `403`, and `ADMIN`/`TA`/`STUDENT` class scoping.
+  - Also resolved the `AI-LOG.md` merge conflict on PR #22 (`feat/review_and_results`, commit `5a710e1`) by merging `origin/main` so `feat/d1-web-gateway-sync` stacks cleanly on top of D2 with zero conflicts.
+- **Changed**:
+  - Replaced placeholder `taIds: []` / `studentCount: 0` / `labCount: 0` / `new Date().toISOString()` in `gateway/src/classes/classes.store.ts` with a real PostgreSQL aggregate query `PostgresPersistence.listClassSummariesForUser` after reviewing cursor-pagination stability in PostgreSQL mode.
+  - Wired `cursor` query forwarding in `HttpApiClient.listMySubmissions` after Web ESLint flagged unused `_cursor`.
+- **Rejected**:
+  - Adding `email` and `displayName` directly onto the `POST /auth/login` response `user` object (would break existing strict contract test `gateway/test/auth.contract.spec.ts`); served them via `GET /auth/me` instead.
+  - Changing mock seed passwords in `web/src/api/mock-seed.ts` (would break existing UI test `web/src/App.spec.tsx`); kept mock seed intact while using real `scrypt` demo credentials for HTTP mode.
+- **Validation**:
+  - Ran all four canonical root quality gates plus builds and Gateway e2e offline: `npm run lint` (Gateway, Web, Judge ESLint + Checker Ruff — 0 errors/warnings), `npm run format:check` (all 4 services clean), `npm run typecheck` (Gateway, Web, Judge `tsc --noEmit` + Checker `mypy --strict` 15 files clean), `npm run test` (Gateway Jest 9 suites / **88 tests**, Web Vitest 2 suites / **9 tests**, Judge Jest 4 suites / **19 tests**, Checker Pytest **30 tests** = **146 passed**), `npm run build --workspace=gateway`, `npm run build --workspace=web`, and `npm run test:e2e --workspace=gateway` (1/1 passed).

@@ -84,17 +84,17 @@ export function LoginPage() {
           </h2>
           <form onSubmit={handleSubmit} noValidate>
             <div className="field">
-              <label htmlFor="login-email">Email</label>
+              <label htmlFor="login-email">Email hoặc tên đăng nhập</label>
               <input
                 id="login-email"
-                type="email"
+                type="text"
                 autoComplete="username"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 onBlur={() => setTouched((prev) => ({ ...prev, email: true }))}
                 aria-invalid={emailError ? 'true' : undefined}
                 aria-describedby={emailError ? 'login-email-error' : undefined}
-                placeholder="ta1@leetkob.edu.vn"
+                placeholder="ta1@leetkob.edu.vn hoặc ta1"
                 required
               />
               {emailError && (

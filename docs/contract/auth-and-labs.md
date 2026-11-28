@@ -1,18 +1,45 @@
-# API Contract: Authentication & Lab Management (Task D1)
+# API Contract: Authentication, Classes & Lab Management (Task D1)
 
 - **Endpoints:**
-  - `POST /auth/login` (Authenticate user & issue JWT)
-  - `POST /labs` (TA creates lab with constraints & test cases)
-  - `GET /labs` (List labs visible to the caller's role and classes)
+  - `POST /auth/login` (Authenticate user by `username` or `email` & issue HS256 JWT)
+  - `GET /auth/me` (Retrieve authenticated caller profile with `email` and `displayName`)
+  - `GET /classes` (Cursor-paginated list of classes visible to caller role/ownership)
+  - `POST /classes` (`ADMIN` creates a class and assigns TAs per `FAQ-01`)
+  - `GET /classes/{classId}/labs` (Cursor-paginated list of labs inside a class — sanitized for students)
+  - `POST /classes/{classId}/labs` (`TA` creates a lab inside an assigned class)
+  - `POST /labs` (Legacy/direct TA lab creation accepting `classId` in request body — preserved 100%)
+  - `GET /labs` (List labs visible to the caller's role and classes — preserved 100%)
   - `GET /labs/{labId}` (Retrieve sanitized lab details for students / full for TA)
 - **Standard Error Format:** [RFC 9457 Problem Details for HTTP APIs](https://datatracker.ietf.org/doc/html/rfc9457)
-- **Request Content-Type:** `application/json`
+- **Request Content-Type:** `application/json` (for `POST` writes)
 - **Success Content-Type:** `application/json`
 - **Error Content-Type:** `application/problem+json`
+- **Referenced FAQs & Rules:** [FAQ-01](../proposal/FAQ.md#faq-01), [FAQ-02](../proposal/FAQ.md#faq-02), [FAQ-05](../proposal/FAQ.md#faq-05), [FAQ-06](../proposal/FAQ.md#faq-06), [post-submissions.md](post-submissions.md), [reviews-and-results.md](reviews-and-results.md).
 
 ---
 
-## 1. Description & Purpose
+## 1. Conventions (Media Types, Auth, Ownership & Visibility)
+
+1. **Authentication:** Signed HS256 Bearer JWT (`Authorization: Bearer <token>`, 24h TTL, required claims `sub`, `role`, `classIds`, `exp`). Missing/invalid/expired tokens return `401 Unauthorized`.
+2. **Role & Ownership Matrix (`FAQ-01`, `FAQ-02`):**
+   - `POST /auth/login`: Public. Accepts `username` **or** `email` plus `password`.
+   - `GET /auth/me`: Any authenticated user (`STUDENT`, `TA`, `ADMIN`).
+   - `GET /classes`: `ADMIN` sees all classes; `TA` sees only assigned classes (`class_staff`); `STUDENT` sees only `ACTIVE` enrolled classes (`class_enrollments`).
+   - `POST /classes`: Strictly `ADMIN` (`TA`/`STUDENT` → `403 Forbidden`).
+   - `GET /classes/{classId}/labs`: `ADMIN` sees all; `TA`/`STUDENT` MUST belong to `classId` (`403 Forbidden` otherwise; missing `classId` → `404 Not Found`). Hidden test cases are stripped at the SQL layer for `STUDENT`.
+   - `POST /classes/{classId}/labs` & `POST /labs`: Strictly `TA` assigned to the target class (`STUDENT`/`ADMIN` or TA of another class → `403 Forbidden`).
+   - `GET /labs/{labId}`: `TA`/`STUDENT` MUST belong to the owning class (`403 Forbidden` for cross-class TA or unenrolled student, matching [post-submissions.md](post-submissions.md)).
+3. **Pagination (`GET /classes`, `GET /classes/{classId}/labs`):**
+   - Opaque Base64URL cursor encoding `(createdAt, id)` ordered by `createdAt DESC, id DESC` (default `limit = 20`, max `limit = 100`). Invalid `cursor` or out-of-range `limit` returns `400 Bad Request`.
+   - Response envelope: `{ "items": [...], "nextCursor": "<opaque>" | null }`.
+4. **Units & Unknown Fields:**
+   - Deductions are decimal numbers in `[0, 10]` stored internally in PostgreSQL as integer centipoints `[0, 1000]`.
+   - `cpuTimeLimitSec` is integer `1..5` (default `1`), `memoryLimitMb` is integer `64..512` (default `256`), `maxPayloadSize` is fixed `65536` bytes (`FAQ-05`).
+   - Unknown extra JSON properties are ignored unless a field rule explicitly rejects them.
+
+---
+
+## 1.5 Description & Purpose (Original Overview)
 
 This contract defines the core authentication and lab provisioning endpoints for LeeTKOB prototype (PA#3 Milestone):
 1. **User Authentication (`POST /auth/login`):** Validates credentials using cryptographic `scrypt` hashing and issues signed HS256 JSON Web Tokens (JWT) containing student/TA roles and assigned class IDs.

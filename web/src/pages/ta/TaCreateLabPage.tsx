@@ -55,16 +55,17 @@ export function TaCreateLabPage({ classId }: TaCreateLabPageProps) {
     {
       code: 'C1',
       type: 'BAN_LIST',
-      description: 'Không sử dụng #include <algorithm>, std::sort, std::stable_sort hoặc qsort.',
-      patterns: ['<algorithm>', 'std::sort', 'std::stable_sort', 'qsort'],
-      deduction: 10,
+      description:
+        'Do not call a library sort function: `std::sort`, `std::stable_sort`, `std::partial_sort`, `qsort`.',
+      patterns: ['std::sort', 'std::stable_sort', 'std::partial_sort', 'qsort'],
+      deduction: 3,
     },
     {
       code: 'C2',
       type: 'SEMANTIC_LLM',
-      description: 'Bắt buộc cài đặt Merge Sort chia để trị đệ quy.',
+      description: 'Sort with a merge sort you wrote yourself.',
       patterns: [],
-      deduction: 5,
+      deduction: 4,
     },
   ]);
   const [cpuTimeLimitSec, setCpuTimeLimitSec] = useState(DEFAULT_CPU_LIMIT_SEC);

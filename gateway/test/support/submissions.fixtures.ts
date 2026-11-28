@@ -2,6 +2,7 @@ import { AuthenticatedUser, Lab, ClassMembership } from '../../src/submissions/s
 import { SubmissionStore } from '../../src/submissions/submissions.store';
 import { LabsStore } from '../../src/labs/labs.store';
 import { AuthStore } from '../../src/auth/auth.store';
+import { ClassesStore } from '../../src/classes/classes.store';
 
 export const MOCK_LABS: Record<string, Lab> = {
   'lab_018f2d5e-7a91-7f3c-b26a-98124d63e001': {
@@ -77,11 +78,13 @@ MOCK_MEMBERSHIPS.push({
 });
 
 export const authStore = new AuthStore();
+export const classesStore = new ClassesStore();
 export const labsStore = new LabsStore();
 export const submissionStore = new SubmissionStore(labsStore, undefined, authStore);
 
 export function resetAllStores(): void {
   authStore.seedDefaults(MOCK_MEMBERSHIPS);
+  classesStore.seedDefaults();
   labsStore.resetLabs(Object.values(MOCK_LABS));
   submissionStore.resetSubmissions();
 }
