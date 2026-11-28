@@ -72,4 +72,70 @@ describe('HttpApiClient', () => {
       ApiError,
     );
   });
+
+  it('authenticates via POST /auth/login + GET /auth/me and maps createLab payload to Gateway DTO', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          accessToken: 'aaa.eyJleHAiOjQxMDI0NDQ4MDB9.ccc',
+          user: { id: 'usr_ta_01', username: 'ta1', role: 'TA', classIds: ['class_cs101'] },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          id: 'usr_ta_01',
+          username: 'ta1',
+          email: 'ta1@leetkob.edu.vn',
+          displayName: 'TA Nguyễn Minh Tuấn',
+          role: 'TA',
+          classIds: ['class_cs101'],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        json: async () => ({
+          id: 'lab_1',
+          classId: 'class_cs101',
+          title: 'Sort Merge',
+          statement: '# Sort',
+          deadline: '2099-12-31T00:00:00.000Z',
+          maxPayloadSize: 65536,
+          testCases: [{ id: 'tc_1', input: '1', expectedOutput: '1', isHidden: false }],
+          constraints: [{ id: 'C1', text: 'Do not call `std::sort`.', deduction: 3 }],
+        }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new HttpApiClient('/api');
+    const session = await client.login({ email: 'ta1@leetkob.edu.vn', password: 'ta123' });
+    expect(session.user.email).toBe('ta1@leetkob.edu.vn');
+    expect(session.user.displayName).toBe('TA Nguyễn Minh Tuấn');
+
+    const created = await client.createLab(session.accessToken, 'class_cs101', {
+      title: 'Sort Merge',
+      statement: '# Sort',
+      openedAt: '2026-11-28T00:00:00.000Z',
+      deadline: '2099-12-31T00:00:00.000Z',
+      cpuTimeLimitSec: 2,
+      memoryLimitMb: 256,
+      testCases: [{ ordinal: 1, isSample: true, input: '1', expectedOutput: '1' }],
+      constraints: [
+        {
+          code: 'C1',
+          type: 'BAN_LIST',
+          description: 'Do not call `std::sort`.',
+          patterns: ['std::sort'],
+          deduction: 3,
+        },
+      ],
+    });
+    expect(created.testCases[0].isSample).toBe(true);
+    expect(created.constraints[0].description).toBe('Do not call `std::sort`.');
+  });
 });
