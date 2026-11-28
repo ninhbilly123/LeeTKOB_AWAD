@@ -1,5 +1,7 @@
 import { hostname } from 'node:os';
 
+export type SandboxMode = 'docker' | 'process';
+
 export interface WorkerConfig {
   workerId: string;
   databaseUrl: string;
@@ -11,6 +13,9 @@ export interface WorkerConfig {
   staleSweepIntervalMs: number;
   retryBackoffSec: number;
   maxLlmCallsPerLab: number;
+  sandboxMode: SandboxMode;
+  sandboxImage: string;
+  dockerBinary: string;
   gppBinary: string;
   compileTimeoutMs: number;
 }
@@ -56,6 +61,14 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
   }
 
   const workerId = (env.WORKER_ID ?? `judge-worker-${hostname()}-${process.pid}`).trim();
+  const rawSandboxMode = (env.SANDBOX_MODE ?? 'docker').trim().toLowerCase();
+  if (rawSandboxMode !== 'docker' && rawSandboxMode !== 'process') {
+    throw new Error(`Invalid SANDBOX_MODE='${env.SANDBOX_MODE}'. Expected 'docker' or 'process'.`);
+  }
+  const sandboxImage = (env.SANDBOX_IMAGE ?? 'leetkob-cpp-sandbox:pa3').trim();
+  if (!sandboxImage) {
+    throw new Error('SANDBOX_IMAGE must be a non-empty Docker image name.');
+  }
 
   return {
     workerId,
@@ -72,6 +85,9 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
     ),
     retryBackoffSec: parsePositiveInt('JOB_RETRY_BACKOFF_SEC', env.JOB_RETRY_BACKOFF_SEC, 5),
     maxLlmCallsPerLab: parsePositiveInt('MAX_LLM_CALLS_PER_LAB', env.MAX_LLM_CALLS_PER_LAB, 200),
+    sandboxMode: rawSandboxMode,
+    sandboxImage,
+    dockerBinary: (env.DOCKER_BINARY ?? 'docker').trim() || 'docker',
     gppBinary: (env.GPP_BINARY ?? 'g++').trim() || 'g++',
     compileTimeoutMs: parsePositiveInt('COMPILE_TIMEOUT_MS', env.COMPILE_TIMEOUT_MS, 10_000),
   };

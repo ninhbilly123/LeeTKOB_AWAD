@@ -6,6 +6,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/main.js",
+    "sandbox:build": "docker build -t leetkob-cpp-sandbox:pa3 ./sandbox",
+    "test:sandbox": "node scripts/run-sandbox-suite.mjs",
     "lint": "eslint \"{src,test}/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",
     "typecheck": "tsc --noEmit",
