@@ -514,6 +514,14 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
     return res.rows.map(mapSubmissionRow);
   }
 
+  async listLabSubmissions(labId: string): Promise<Submission[]> {
+    const res = await this.requirePool().query(
+      'SELECT * FROM submissions WHERE lab_id = $1 ORDER BY submitted_at DESC, id DESC',
+      [labId],
+    );
+    return res.rows.map(mapSubmissionRow);
+  }
+
   async getJobsForSubmission(submissionId: string): Promise<SubmissionJob[]> {
     const res = await this.requirePool().query(
       'SELECT id, stage, status, attempts, last_error, payload FROM submission_jobs WHERE submission_id = $1',
