@@ -3,6 +3,7 @@ import { Pool } from 'pg';
 import { randomUUID } from 'node:crypto';
 import type { DbPoolSettings } from '../common/config';
 import { problemException } from '../common/http-problems';
+import type { KeysetCursor } from '../common/pagination';
 import {
   CheckerCompletionInput,
   ClassRecord,
@@ -47,6 +48,22 @@ export interface AtomicCreateSubmissionParams {
   idempotencyKey: string;
   payloadHash: string;
   receivedAt: number;
+}
+
+export interface OptionalIdempotencyParams {
+  actorId: string;
+  idempotencyKey: string;
+  payloadHash: string;
+  nowMs: number;
+}
+
+function isPgUniqueViolation(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    String((err as { code?: unknown }).code) === '23505'
+  );
 }
 
 export function buildSubmissionJob(
@@ -348,10 +365,137 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
     }));
   }
 
-  async createClass(cls: ClassRecord, taIds: ReadonlyArray<string> = []): Promise<void> {
+  /**
+   * Keyset-paginated class summary query (docs/engineering-rules.md §3 — never OFFSET).
+   * Fetches limit + 1 rows ordered by (created_at DESC, id DESC) so caller knows if more exist.
+   */
+  async listClassSummariesPageForUser(
+    userId: string,
+    role: string,
+    cursor: KeysetCursor | null,
+    limit: number,
+  ): Promise<
+    Array<
+      ClassRecord & {
+        taIds: string[];
+        studentCount: number;
+        labCount: number;
+        createdAt: string;
+      }
+    >
+  > {
+    const baseSelect = `
+      SELECT
+        c.id,
+        c.code,
+        c.name,
+        c.term,
+        c.invite_code,
+        c.created_by,
+        c.created_at,
+        COALESCE(
+          (SELECT array_agg(cs2.ta_id ORDER BY cs2.ta_id ASC)
+           FROM class_staff cs2
+           WHERE cs2.class_id = c.id),
+          ARRAY[]::text[]
+        ) AS ta_ids,
+        (SELECT COUNT(*)::int
+         FROM class_enrollments ce2
+         WHERE ce2.class_id = c.id AND ce2.status = 'ACTIVE') AS student_count,
+        (SELECT COUNT(*)::int
+         FROM labs l2
+         WHERE l2.class_id = c.id) AS lab_count
+      FROM classes c
+    `;
+    const params: unknown[] = [];
+    let joinSql = '';
+    const whereClauses: string[] = [];
+
+    if (role === 'TA') {
+      joinSql = 'INNER JOIN class_staff cs ON cs.class_id = c.id';
+      params.push(userId);
+      whereClauses.push(`cs.ta_id = $${params.length}`);
+    } else if (role !== 'ADMIN') {
+      joinSql = 'INNER JOIN class_enrollments ce ON ce.class_id = c.id';
+      params.push(userId);
+      whereClauses.push(`ce.student_id = $${params.length} AND ce.status = 'ACTIVE'`);
+    }
+
+    if (cursor) {
+      params.push(cursor.t, cursor.id);
+      whereClauses.push(
+        `(c.created_at, c.id) < ($${params.length - 1}::timestamptz, $${params.length})`,
+      );
+    }
+
+    params.push(limit + 1);
+    const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+    const sql = `${baseSelect} ${joinSql} ${whereSql} ORDER BY c.created_at DESC, c.id DESC LIMIT $${params.length}`;
+    const res = await this.requirePool().query(sql, params);
+
+    return res.rows.map((row) => ({
+      id: String(row.id),
+      code: String(row.code),
+      name: String(row.name),
+      term: String(row.term),
+      inviteCode: row.invite_code ? String(row.invite_code) : null,
+      createdBy: row.created_by ? String(row.created_by) : null,
+      taIds: Array.isArray(row.ta_ids) ? row.ta_ids.map((id) => String(id)) : [],
+      studentCount: Number(row.student_count ?? 0),
+      labCount: Number(row.lab_count ?? 0),
+      createdAt:
+        row.created_at instanceof Date
+          ? row.created_at.toISOString()
+          : String(row.created_at ?? new Date().toISOString()),
+    }));
+  }
+
+  async createClass<TResponse extends ClassRecord = ClassRecord>(
+    cls: TResponse,
+    taIds: ReadonlyArray<string> = [],
+    idempotency?: OptionalIdempotencyParams,
+  ): Promise<TResponse> {
     const client = await this.requirePool().connect();
     try {
       await client.query('BEGIN');
+      if (idempotency) {
+        await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [idempotency.actorId]);
+        const cachedRes = await client.query(
+          `SELECT payload_hash, response_body, expires_at
+           FROM idempotency_records
+           WHERE student_id = $1 AND idempotency_key = $2`,
+          [idempotency.actorId, idempotency.idempotencyKey],
+        );
+        const cached = cachedRes.rows[0];
+        if (cached) {
+          if (Date.parse(toIsoString(cached.expires_at)) > idempotency.nowMs) {
+            if (String(cached.payload_hash) !== idempotency.payloadHash) {
+              throw problemException(
+                HttpStatus.CONFLICT,
+                'The provided Idempotency-Key has already been used with different request parameters.',
+                'idempotency-conflict',
+              );
+            }
+            await client.query('COMMIT');
+            return parseJsonColumn<TResponse>(cached.response_body, cls);
+          }
+          await client.query(
+            'DELETE FROM idempotency_records WHERE student_id = $1 AND idempotency_key = $2',
+            [idempotency.actorId, idempotency.idempotencyKey],
+          );
+        }
+      }
+
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+        `class_code:${cls.code.toLowerCase()}`,
+      ]);
+      const dupRes = await client.query('SELECT id FROM classes WHERE LOWER(code) = LOWER($1)', [
+        cls.code,
+      ]);
+      if (dupRes.rows.length > 0) {
+        throw problemException(HttpStatus.CONFLICT, `Class code '${cls.code}' already exists.`);
+      }
+
       await client.query(
         `INSERT INTO classes (id, code, name, term, invite_code, created_by)
          VALUES ($1, $2, $3, $4, $5, $6)`,
@@ -365,12 +509,45 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
           [cls.id, taId],
         );
       }
+
+      if (idempotency) {
+        const nowIso = new Date(idempotency.nowMs).toISOString();
+        const expiresAt = new Date(idempotency.nowMs + 24 * 60 * 60 * 1000).toISOString();
+        await client.query(
+          `INSERT INTO idempotency_records (
+             student_id, lab_id, idempotency_key, payload_hash, status_code,
+             response_headers, response_body, created_at, expires_at
+           ) VALUES ($1, NULL, $2, $3, 201, $4::jsonb, $5::jsonb, $6, $7)
+           ON CONFLICT (student_id, idempotency_key) DO UPDATE SET
+             lab_id = EXCLUDED.lab_id,
+             payload_hash = EXCLUDED.payload_hash,
+             status_code = EXCLUDED.status_code,
+             response_headers = EXCLUDED.response_headers,
+             response_body = EXCLUDED.response_body,
+             created_at = EXCLUDED.created_at,
+             expires_at = EXCLUDED.expires_at`,
+          [
+            idempotency.actorId,
+            idempotency.idempotencyKey,
+            idempotency.payloadHash,
+            JSON.stringify({ Location: `/classes/${cls.id}`, 'Content-Type': 'application/json' }),
+            JSON.stringify(cls),
+            nowIso,
+            expiresAt,
+          ],
+        );
+      }
+
       await client.query('COMMIT');
+      return cls;
     } catch (err) {
       try {
         await client.query('ROLLBACK');
       } catch {
         // Ignore rollback failure
+      }
+      if (isPgUniqueViolation(err)) {
+        throw problemException(HttpStatus.CONFLICT, `Class code '${cls.code}' already exists.`);
       }
       throw err;
     } finally {
@@ -380,10 +557,37 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
 
   // --- Labs (Normalized lab_test_cases & lab_constraints) ---
 
-  async saveLab(lab: Lab): Promise<void> {
+  async saveLab(lab: Lab, idempotency?: OptionalIdempotencyParams): Promise<Lab> {
     const client = await this.requirePool().connect();
     try {
       await client.query('BEGIN');
+      if (idempotency) {
+        await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [idempotency.actorId]);
+        const cachedRes = await client.query(
+          `SELECT payload_hash, response_body, expires_at
+           FROM idempotency_records
+           WHERE student_id = $1 AND idempotency_key = $2`,
+          [idempotency.actorId, idempotency.idempotencyKey],
+        );
+        const cached = cachedRes.rows[0];
+        if (cached) {
+          if (Date.parse(toIsoString(cached.expires_at)) > idempotency.nowMs) {
+            if (String(cached.payload_hash) !== idempotency.payloadHash) {
+              throw problemException(
+                HttpStatus.CONFLICT,
+                'The provided Idempotency-Key has already been used with different request parameters.',
+                'idempotency-conflict',
+              );
+            }
+            await client.query('COMMIT');
+            return parseJsonColumn<Lab>(cached.response_body, lab);
+          }
+          await client.query(
+            'DELETE FROM idempotency_records WHERE student_id = $1 AND idempotency_key = $2',
+            [idempotency.actorId, idempotency.idempotencyKey],
+          );
+        }
+      }
       const openedAt =
         lab.openedAt ??
         new Date(Math.min(Date.now(), Date.parse(lab.deadline) - 1000)).toISOString();
@@ -500,7 +704,37 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
         }
       }
 
+      if (idempotency) {
+        const nowIso = new Date(idempotency.nowMs).toISOString();
+        const expiresAt = new Date(idempotency.nowMs + 24 * 60 * 60 * 1000).toISOString();
+        await client.query(
+          `INSERT INTO idempotency_records (
+             student_id, lab_id, idempotency_key, payload_hash, status_code,
+             response_headers, response_body, created_at, expires_at
+           ) VALUES ($1, $2, $3, $4, 201, $5::jsonb, $6::jsonb, $7, $8)
+           ON CONFLICT (student_id, idempotency_key) DO UPDATE SET
+             lab_id = EXCLUDED.lab_id,
+             payload_hash = EXCLUDED.payload_hash,
+             status_code = EXCLUDED.status_code,
+             response_headers = EXCLUDED.response_headers,
+             response_body = EXCLUDED.response_body,
+             created_at = EXCLUDED.created_at,
+             expires_at = EXCLUDED.expires_at`,
+          [
+            idempotency.actorId,
+            lab.id,
+            idempotency.idempotencyKey,
+            idempotency.payloadHash,
+            JSON.stringify({ Location: `/labs/${lab.id}`, 'Content-Type': 'application/json' }),
+            JSON.stringify(lab),
+            nowIso,
+            expiresAt,
+          ],
+        );
+      }
+
       await client.query('COMMIT');
+      return lab;
     } catch (err) {
       try {
         await client.query('ROLLBACK');
@@ -610,6 +844,69 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  /**
+   * Keyset-paginated class labs query backed by idx_labs_class_cursor (never OFFSET).
+   * Fetches limit + 1 rows ordered by (created_at DESC, id DESC).
+   */
+  async listClassLabsPage(
+    classId: string,
+    studentOnly: boolean,
+    cursor: KeysetCursor | null,
+    limit: number,
+  ): Promise<Lab[]> {
+    const params: unknown[] = [classId];
+    let cursorClause = '';
+    if (cursor) {
+      params.push(cursor.t, cursor.id);
+      cursorClause = `AND (created_at, id) < ($${params.length - 1}::timestamptz, $${params.length})`;
+    }
+    params.push(limit + 1);
+    const res = await this.requirePool().query(
+      `SELECT * FROM labs
+       WHERE class_id = $1 ${cursorClause}
+       ORDER BY created_at DESC, id DESC
+       LIMIT $${params.length}`,
+      params,
+    );
+    if (res.rows.length === 0) {
+      return [];
+    }
+
+    const labIds = res.rows.map((row) => String(row.id));
+    const tcBatchQuery = studentOnly
+      ? 'SELECT id, lab_id, ordinal, is_hidden, input, expected_output FROM lab_test_cases WHERE lab_id = ANY($1::text[]) AND is_hidden = FALSE ORDER BY lab_id ASC, ordinal ASC'
+      : 'SELECT id, lab_id, ordinal, is_hidden, input, expected_output FROM lab_test_cases WHERE lab_id = ANY($1::text[]) ORDER BY lab_id ASC, ordinal ASC';
+
+    const [tcRes, conRes] = await Promise.all([
+      this.requirePool().query(tcBatchQuery, [labIds]),
+      this.requirePool().query(
+        'SELECT id, lab_id, constraint_code, check_type, constraint_text, ban_patterns, deduction_centipoints, ordinal FROM lab_constraints WHERE lab_id = ANY($1::text[]) ORDER BY lab_id ASC, ordinal ASC',
+        [labIds],
+      ),
+    ]);
+
+    const tcByLab = new Map<string, LabTestCase[]>();
+    for (const tcRow of tcRes.rows) {
+      const lid = String(tcRow.lab_id ?? '');
+      const list = tcByLab.get(lid) ?? [];
+      list.push(mapTestCaseRow(tcRow));
+      tcByLab.set(lid, list);
+    }
+
+    const conByLab = new Map<string, LabConstraint[]>();
+    for (const conRow of conRes.rows) {
+      const lid = String(conRow.lab_id ?? '');
+      const list = conByLab.get(lid) ?? [];
+      list.push(mapConstraintRow(conRow));
+      conByLab.set(lid, list);
+    }
+
+    return res.rows.map((row) => {
+      const lid = String(row.id);
+      return mapLabRow(row, tcByLab.get(lid) ?? [], conByLab.get(lid) ?? []);
+    });
+  }
+
   // --- Submissions & Atomic Transactional Outbox ---
 
   async getSubmission(id: string): Promise<Submission | undefined> {
@@ -643,6 +940,34 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
     const res = await this.requirePool().query(
       'SELECT * FROM submissions WHERE lab_id = $1 ORDER BY submitted_at DESC, id DESC',
       [labId],
+    );
+    return res.rows.map(mapSubmissionRow);
+  }
+
+  /** Keyset-paginated submissions list backed by idx_submissions_student_history (never OFFSET). */
+  async listSubmissionsPage(
+    labId: string,
+    studentId: string | null,
+    cursor: KeysetCursor | null,
+    limit: number,
+  ): Promise<Submission[]> {
+    const params: unknown[] = [labId];
+    const clauses: string[] = ['lab_id = $1'];
+    if (studentId) {
+      params.push(studentId);
+      clauses.push(`student_id = $${params.length}`);
+    }
+    if (cursor) {
+      params.push(cursor.t, cursor.id);
+      clauses.push(`(submitted_at, id) < ($${params.length - 1}::timestamptz, $${params.length})`);
+    }
+    params.push(limit + 1);
+    const res = await this.requirePool().query(
+      `SELECT * FROM submissions
+       WHERE ${clauses.join(' AND ')}
+       ORDER BY submitted_at DESC, id DESC
+       LIMIT $${params.length}`,
+      params,
     );
     return res.rows.map(mapSubmissionRow);
   }

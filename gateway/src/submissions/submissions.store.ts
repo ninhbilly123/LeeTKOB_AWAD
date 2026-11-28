@@ -2,6 +2,7 @@ import { HttpStatus, Injectable, Optional } from '@nestjs/common';
 import { randomInt, randomUUID } from 'node:crypto';
 import { AuthStore } from '../auth/auth.store';
 import { problemException } from '../common/http-problems';
+import { compareDescTimestampId, isAfterDescKeyset, KeysetCursor } from '../common/pagination';
 import {
   AtomicCreateSubmissionParams,
   PostgresPersistence,
@@ -41,7 +42,7 @@ export class SubmissionStore {
   private readonly testResults = new Map<string, SubmissionTestResult[]>();
   private readonly findings = new Map<string, ConstraintFindingRecord[]>();
   private readonly jobs = new Map<string, SubmissionJob>();
-  private readonly idempotencyRecords = new Map<string, IdempotencyRecord>();
+  private readonly idempotencyRecords = new Map<string, IdempotencyRecord<unknown>>();
   private readonly auditLogs: InMemoryAuditLogEntry[] = [];
 
   constructor(
@@ -94,7 +95,7 @@ export class SubmissionStore {
     }
     return [...this.submissions.values()]
       .filter((s) => s.labId === labId && s.studentId === studentId)
-      .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt) || b.id.localeCompare(a.id));
+      .sort((a, b) => compareDescTimestampId(a.submittedAt, a.id, b.submittedAt, b.id));
   }
 
   async listLabSubmissionsAsync(labId: string): Promise<Submission[]> {
@@ -103,7 +104,26 @@ export class SubmissionStore {
     }
     return [...this.submissions.values()]
       .filter((s) => s.labId === labId)
-      .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt) || b.id.localeCompare(a.id));
+      .sort((a, b) => compareDescTimestampId(a.submittedAt, a.id, b.submittedAt, b.id));
+  }
+
+  /** Keyset-paginated submissions lookup returning up to limit + 1 records. */
+  async listSubmissionsPageAsync(
+    labId: string,
+    studentId: string | null,
+    cursor: KeysetCursor | null,
+    limit: number,
+  ): Promise<Submission[]> {
+    if (this.usePostgres) {
+      return this.postgres!.listSubmissionsPage(labId, studentId, cursor, limit);
+    }
+    const all = studentId
+      ? await this.listStudentSubmissionsAsync(labId, studentId)
+      : await this.listLabSubmissionsAsync(labId);
+    const filtered = cursor
+      ? all.filter((s) => isAfterDescKeyset(s.submittedAt, s.id, cursor))
+      : all;
+    return filtered.slice(0, limit + 1);
   }
 
   async getSubmissionFindingsAsync(submissionId: string): Promise<ConstraintFindingRecord[]> {
@@ -389,10 +409,14 @@ export class SubmissionStore {
     return [...this.submissions.values()]
       .filter((s) => s.labId === labId && s.overallVerdict === 'AC')
       .filter((s) => (scope === 'counted' ? Boolean(s.isCounting) : true))
-      .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt))
+      .sort((a, b) => compareDescTimestampId(a.submittedAt, a.id, b.submittedAt, b.id))
       .map((sub) => ({
         submission: { ...sub },
-        findings: (this.findings.get(sub.id) ?? []).map((f) => ({ ...f })),
+        findings: (this.findings.get(sub.id) ?? [])
+          .map((f) => ({ ...f }))
+          .sort((a, b) =>
+            a.constraintCode < b.constraintCode ? -1 : a.constraintCode > b.constraintCode ? 1 : 0,
+          ),
       }));
   }
 
@@ -453,21 +477,21 @@ export class SubmissionStore {
 
   // --- Idempotency ---
 
-  getIdempotencyRecord(
-    studentId: string,
+  getIdempotencyRecord<TBody = SubmissionResponse>(
+    actorId: string,
     key: string,
     nowMs: number = Date.now(),
-  ): IdempotencyRecord | undefined {
-    const scopedKey = JSON.stringify([studentId, key]);
+  ): IdempotencyRecord<TBody> | undefined {
+    const scopedKey = JSON.stringify([actorId, key]);
     const record = this.idempotencyRecords.get(scopedKey);
     if (record && Date.parse(record.expiresAt) <= nowMs) {
       this.idempotencyRecords.delete(scopedKey);
       return undefined;
     }
-    return record;
+    return record as IdempotencyRecord<TBody> | undefined;
   }
 
-  saveIdempotencyRecord(record: IdempotencyRecord): void {
+  saveIdempotencyRecord<TBody = SubmissionResponse>(record: IdempotencyRecord<TBody>): void {
     this.idempotencyRecords.set(JSON.stringify([record.studentId, record.key]), record);
   }
 

@@ -2,6 +2,11 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { AuthStore } from '../auth/auth.store';
 import { problemException } from '../common/http-problems';
+import {
+  encodeKeysetCursor,
+  isAfterReviewQueueKeyset,
+  parseKeysetPagination,
+} from '../common/pagination';
 import { LabsStore } from '../labs/labs.store';
 import {
   ConstraintFindingRecord,
@@ -98,6 +103,7 @@ export interface TaReviewQueueResponse {
   publishedAt: string | null;
   pendingReviewCount: number;
   items: TaReviewFindingView[];
+  nextCursor: string | null;
 }
 
 export interface TaSubmissionReviewResponse {
@@ -157,16 +163,31 @@ export class SubmissionsService {
     labId: string,
     userId: string,
     role: UserRole,
-  ): Promise<{ labId: string; isPublished: boolean; submissions: SubmissionSummaryItem[] }> {
+    rawCursor?: string,
+    rawLimit?: string,
+  ): Promise<{
+    labId: string;
+    isPublished: boolean;
+    submissions: SubmissionSummaryItem[];
+    nextCursor: string | null;
+  }> {
+    const scope = `lab-submissions:${labId}:${role === 'STUDENT' ? userId : 'all'}`;
+    const { cursor, limit } = parseKeysetPagination(rawCursor, rawLimit, scope, {
+      defaultLimit: 50,
+    });
     const lab = await this.requireLabAccess(labId, userId, role);
-    const raw =
-      role === 'STUDENT'
-        ? await this.store.listStudentSubmissionsAsync(labId, userId)
-        : await this.store.listLabSubmissionsAsync(labId);
+    const rows = await this.store.listSubmissionsPageAsync(
+      labId,
+      role === 'STUDENT' ? userId : null,
+      cursor,
+      limit,
+    );
+    const hasMore = rows.length > limit;
+    const pageRows = hasMore ? rows.slice(0, limit) : rows;
 
     const studentNameCache = new Map<string, string>();
     const submissions = await Promise.all(
-      raw.map(async (s) => ({
+      pageRows.map(async (s) => ({
         id: s.id,
         labId: s.labId,
         studentId: s.studentId,
@@ -182,10 +203,13 @@ export class SubmissionsService {
       })),
     );
 
+    const last = pageRows[pageRows.length - 1];
     return {
       labId: lab.id,
       isPublished: Boolean(lab.isPublished),
       submissions,
+      nextCursor:
+        hasMore && last ? encodeKeysetCursor({ s: scope, t: last.submittedAt, id: last.id }) : null,
     };
   }
 
@@ -290,11 +314,18 @@ export class SubmissionsService {
     userId: string,
     role: UserRole,
     scope: 'counted' | 'all' = 'counted',
+    rawCursor?: string,
+    rawLimit?: string,
   ): Promise<TaReviewQueueResponse> {
+    const cursorScope = `review-queue:${labId}:${scope}`;
+    const { cursor, limit } = parseKeysetPagination(rawCursor, rawLimit, cursorScope, {
+      defaultLimit: 50,
+      requireSecondaryKey: true,
+    });
     const lab = await this.requireTaOrAdminLabAccess(labId, userId, role);
     const entries = await this.store.listLabReviewQueueAsync(labId, scope);
 
-    const items: TaReviewFindingView[] = [];
+    const allItems: TaReviewFindingView[] = [];
     const studentNameCache = new Map<string, string>();
     for (const entry of entries) {
       const studentName = await this.resolveStudentDisplayName(
@@ -313,13 +344,27 @@ export class SubmissionsService {
           : entry.findings;
 
       for (const finding of relevantFindings) {
-        items.push(this.toTaReviewFindingView(lab, entry.submission, finding, studentName));
+        allItems.push(this.toTaReviewFindingView(lab, entry.submission, finding, studentName));
       }
     }
 
-    const pendingReviewCount = items.filter(
+    const pendingReviewCount = allItems.filter(
       (item) => item.reviewStatus === 'PENDING_REVIEW',
     ).length;
+
+    const afterCursor = cursor
+      ? allItems.filter((item) =>
+          isAfterReviewQueueKeyset(
+            item.submittedAt,
+            item.submissionId,
+            item.constraintCode,
+            cursor,
+          ),
+        )
+      : allItems;
+    const hasMore = afterCursor.length > limit;
+    const items = hasMore ? afterCursor.slice(0, limit) : afterCursor;
+    const last = items[items.length - 1];
 
     return {
       labId: lab.id,
@@ -329,6 +374,15 @@ export class SubmissionsService {
       publishedAt: lab.publishedAt ?? null,
       pendingReviewCount,
       items,
+      nextCursor:
+        hasMore && last
+          ? encodeKeysetCursor({
+              s: cursorScope,
+              t: last.submittedAt,
+              id: last.submissionId,
+              k: last.constraintCode,
+            })
+          : null,
     };
   }
 
@@ -377,6 +431,14 @@ export class SubmissionsService {
       throw problemException(
         HttpStatus.BAD_REQUEST,
         'Modifying a review decision after Publish requires a non-empty reason (FAQ-12).',
+        undefined,
+        [
+          {
+            field: 'reason',
+            message:
+              'Modifying a review decision after Publish requires a non-empty reason (FAQ-12).',
+          },
+        ],
       );
     }
     const submission = await this.store.getSubmissionAsync(submissionId);
