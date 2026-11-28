@@ -428,6 +428,14 @@ Team Members:
 
 ---
 
+## 2026-11-28 — Add feature specification guidance from CSC13114 Session 02
+
+- **Tool**: Codex.
+- **Asked for**: Compare the Specifications for Agents lecture with `docs/engineering-rules.md` and add the guidance the document was missing.
+- **Kept**: The Session 05 endpoint-contract rules and the existing submission API contract.
+- **Changed**: Added the feature spec outline, the five areas to check during spec review, and the mapping from numbered acceptance criteria to tests. Used submission idempotency as a LeeTKOB example and checked it against the contract and the existing concurrency test.
+- **Rejected**: Copying the restaurant example's endpoint and error format into LeeTKOB. Its API behavior is specific to the classroom example.
+- **Validation**: Verified the eight spec sections, both Markdown links, and a clean `git diff --check`. Application tests were skipped for this documentation edit.
 ## 2026-11-28 — Sync PostgreSQL 16 migrations and Gateway persistence with `checker/`, FAQ, and Proposal (Phạm An Ninh)
 - **Tool**: Antigravity.
 - **Asked for**: Audit `gateway/migrations/0001_init_pa3_schema.{up,down}.sql` and `gateway/src/persistence/` against the merged `checker/` implementation (`models.py`, `hard_rules.py`, `sanitizer.py`, `guardrails.py`, `llm_client.py`, `semantic_checker.py`), `docs/contract/checker-output.md`, `docs/proposal/FAQ.md` (`FAQ-01`..`FAQ-14`), and `docs/proposal/proposal-detail.md` (§2, §4.2), document discrepancies in `docs/database-checker-sync-plan.md`, and apply the approved Option 1 consolidation directly into `0001_init_pa3_schema`.
