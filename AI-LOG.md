@@ -492,3 +492,11 @@ Team Members:
 - **Validation**:
   - Offline canonical gates: `npm run lint` (0 errors/warnings across all 4 services), `npm run format:check` (all clean), `npm run typecheck` (3 TS workspaces + `mypy --strict` 15 Python files), `npm run test` (Gateway 82 Jest + Web 8 Vitest + Judge 19 Jest + Checker 30 Pytest = **139 passed**), `npm run build --workspace=judge`, `npm run build --workspace=gateway`, and red-flag grep scan (0 matches).
   - Real Docker verification (`npm run sandbox:build --workspace=judge` & `npm run test:sandbox --workspace=judge` on local Docker Desktop): `00_sanity_ac.cpp` -> `AC`, and **9/9 rubric attack rows PASSED** (`1=RE/0 canary hits`, `2=TLE via RLIMIT_CPU`, `3=TLE/0 lingering containers`, `4=MLE via OOMKilled`, `5=RE/0 lingering`, `6=RE`, `7=RE`, `8=RE`, `9a=RE & 9b=CE/0 canary leaks`).
+## 2026-11-28 — Add a skill for writing API contracts and contract tests
+
+- **Tool**: Codex.
+- **Asked for**: Combine the IA#3 CONTRACT.md, the applicable rubric, and LeeTKOB engineering rules into a reusable skill and require it in AGENTS.md.
+- **Kept**: The LeeTKOB submission contract's own authorization and replay behavior.
+- **Changed**: Added the five-section HTTP outline, a separate path for internal payloads, and a test workflow that checks both responses and persisted outcomes. Registered the skill in the repo catalog and AGENTS.md.
+- **Rejected**: Copying the IA#3 menu service's status codes and replay headers into LeeTKOB. These details belong to each endpoint's approved contract.
+- **Validation**: The skill-creator validator passed. Verified the five IA#3 sections, ten links, and the submission examples against the existing contract and test sources. Application tests were skipped for this documentation-only change.
