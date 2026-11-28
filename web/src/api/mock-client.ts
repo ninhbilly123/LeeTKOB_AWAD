@@ -16,14 +16,18 @@ import {
 import type {
   ConstraintVerdictDetail,
   EvidenceSpan,
+  LabSubmissionLookupItem,
+  PublishLabResult,
   ReviewQueueBucket,
   ReviewQueueItem,
   ReviewQueueQuery,
+  TaReviewDecisionInput,
   TaSubmissionReviewView,
 } from '../types/review';
 import type {
   CreateSubmissionInput,
   JudgeVerdict,
+  PublishedGradeView,
   StudentSubmissionSummary,
   StudentSubmissionView,
   SubmissionAcceptedDto,
@@ -38,6 +42,8 @@ export interface MockApiClientOptions {
   judgeStepDelayMs?: number;
   /** Optional hook to simulate a one-shot 500 error for retry/idempotency testing. */
   failNextSubmitCount?: number;
+  /** Optional clock provider for deadline/publish tests. */
+  nowProvider?: () => number;
 }
 
 interface IdempotencyEntry {
@@ -180,6 +186,7 @@ export class MockApiClient implements LeeTkobApiClient {
   private readonly idempotencyStore = new Map<string, IdempotencyEntry>();
   private readonly judgeStepDelayMs: number;
   private failNextSubmitCount: number;
+  private readonly nowProvider: () => number;
   private nextIdSeq = 100;
 
   constructor(options: MockApiClientOptions = {}) {
@@ -187,9 +194,29 @@ export class MockApiClient implements LeeTkobApiClient {
     this.users = seed.users;
     this.classes = seed.classes;
     this.labs = seed.labs;
-    this.submissions = seed.submissions;
+    this.submissions = seed.submissions.map((sub) => ({
+      ...sub,
+      constraintVerdicts: sub.constraintVerdicts.map((cv) => ({
+        ...cv,
+        findingId: cv.findingId ?? `fnd_${sub.id}_${cv.code}`,
+        reviewStatus:
+          cv.reviewStatus ??
+          (cv.verdict === 'violation' ||
+          cv.verdict === 'unsure' ||
+          sub.queueBucket === 'PASS_SAMPLE_10PCT'
+            ? 'PENDING_REVIEW'
+            : 'NOT_QUEUED'),
+        taDecision: cv.taDecision ?? null,
+        taDeduction: cv.taDeduction ?? null,
+        taEvidence: cv.taEvidence ?? null,
+        taReason: cv.taReason ?? null,
+        reviewedBy: cv.reviewedBy ?? null,
+        reviewedAt: cv.reviewedAt ?? null,
+      })),
+    }));
     this.judgeStepDelayMs = options.judgeStepDelayMs ?? 350;
     this.failNextSubmitCount = options.failNextSubmitCount ?? 0;
+    this.nowProvider = options.nowProvider ?? (() => Date.now());
 
     // Pre-issue deterministic mock tokens for active sessions across reloads if desired
     for (const user of this.users) {
@@ -709,7 +736,22 @@ export class MockApiClient implements LeeTkobApiClient {
         const checked = evaluateMockConstraints(record.code, lab);
         record.checkerStatus = 'COMPLETED';
         record.queueBucket = checked.bucket;
-        record.constraintVerdicts = checked.verdicts;
+        record.constraintVerdicts = checked.verdicts.map((cv) => ({
+          ...cv,
+          findingId: `fnd_${record.id}_${cv.code}`,
+          reviewStatus:
+            cv.verdict === 'violation' ||
+            cv.verdict === 'unsure' ||
+            checked.bucket === 'PASS_SAMPLE_10PCT'
+              ? 'PENDING_REVIEW'
+              : 'NOT_QUEUED',
+          taDecision: null,
+          taDeduction: null,
+          taEvidence: null,
+          taReason: null,
+          reviewedBy: null,
+          reviewedAt: null,
+        }));
       } else {
         record.checkerStatus = 'COMPLETED';
         record.constraintVerdicts = [];
@@ -785,6 +827,38 @@ export class MockApiClient implements LeeTkobApiClient {
 
     // STRICT FAQ-02 & FAQ-08 PROJECTION:
     // Strip test inputs/outputs AND strip all constraintVerdicts/evidence/unsureReason before Publish.
+    let publishedGrade: PublishedGradeView | null = null;
+    if (lab.publishedAt) {
+      const confirmedDeductions = sub.constraintVerdicts
+        .filter((cv) => cv.reviewStatus === 'APPROVED_VIOLATION' && cv.taDecision === 'VIOLATION')
+        .map((cv) => {
+          const ev =
+            cv.taEvidence && cv.taEvidence.length > 0
+              ? cv.taEvidence
+              : cv.evidence.map((span) => ({ line: span.lineStart, text: span.snippet }));
+          return {
+            constraintCode: cv.code,
+            description: cv.description,
+            deduction: cv.taDeduction ?? cv.taConfiguredDeduction,
+            evidenceLines: ev.map((e) => e.line),
+            evidence: ev,
+            taNote: cv.taReason ?? undefined,
+          };
+        });
+      const rawScore = sub.overallVerdict === 'AC' ? 10 : 0;
+      const totalDeductions = confirmedDeductions.reduce((sum, item) => sum + item.deduction, 0);
+      publishedGrade = {
+        rawScore,
+        totalDeductions,
+        finalScore:
+          sub.overallVerdict === 'AC'
+            ? Math.max(0, Math.round((10 - totalDeductions) * 100) / 100)
+            : 0,
+        publishedAt: lab.publishedAt,
+        confirmedDeductions,
+      };
+    }
+
     return {
       id: sub.id,
       labId: sub.labId,
@@ -804,7 +878,42 @@ export class MockApiClient implements LeeTkobApiClient {
         verdict: t.verdict,
         timeMs: t.timeMs,
       })),
-      publishedGrade: null,
+      publishedGrade,
+    };
+  }
+
+  async listLabSubmissions(
+    token: string,
+    labId: string,
+  ): Promise<{ labId: string; isPublished: boolean; submissions: LabSubmissionLookupItem[] }> {
+    const instance = `/labs/${labId}/submissions`;
+    const user = this.authenticate(token, instance);
+    const lab = this.getLabOrThrow(labId, instance);
+    this.ensureClassAccess(user, lab.classId, instance);
+
+    const visible = this.submissions
+      .filter((s) => s.labId === labId)
+      .filter((s) => (user.role === 'STUDENT' ? s.studentId === user.id : true))
+      .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt))
+      .map<LabSubmissionLookupItem>((s) => ({
+        id: s.id,
+        labId: s.labId,
+        studentId: s.studentId,
+        studentName: s.studentName,
+        status: s.status,
+        overallVerdict: s.overallVerdict,
+        passedTests: s.internalTestRuns.filter((t) => t.verdict === 'AC').length,
+        totalTests: lab.testCases.length,
+        maxTimeMs: s.maxTimeMs,
+        maxMemoryKb: s.maxMemoryKb,
+        isCountedForGrade: s.isCountedForGrade,
+        submittedAt: s.submittedAt,
+      }));
+
+    return {
+      labId: lab.id,
+      isPublished: Boolean(lab.publishedAt),
+      submissions: visible,
     };
   }
 
@@ -924,5 +1033,137 @@ export class MockApiClient implements LeeTkobApiClient {
       queueBucket: sub.queueBucket,
       constraintVerdicts: structuredClone(sub.constraintVerdicts),
     };
+  }
+
+  async reviewFinding(
+    token: string,
+    labId: string,
+    submissionId: string,
+    findingId: string,
+    input: TaReviewDecisionInput,
+  ): Promise<ConstraintVerdictDetail> {
+    const instance = `/labs/${labId}/submissions/${submissionId}/findings/${findingId}`;
+    const user = this.authenticate(token, instance);
+    if (user.role !== 'TA' && user.role !== 'ADMIN') {
+      throw problemError(
+        403,
+        'forbidden',
+        'Forbidden',
+        'Chỉ Trợ giảng của lớp mới có quyền duyệt ràng buộc.',
+        instance,
+      );
+    }
+    const lab = this.getLabOrThrow(labId, instance);
+    this.ensureClassAccess(user, lab.classId, instance);
+
+    if (lab.publishedAt && (!input.reason || input.reason.trim().length === 0)) {
+      throw problemError(
+        400,
+        'bad-request',
+        'Bad Request',
+        'Modifying a review decision after Publish requires a non-empty reason (FAQ-12).',
+        instance,
+      );
+    }
+    if (input.decision === 'VIOLATION' && (!input.evidence || input.evidence.length === 0)) {
+      throw problemError(
+        400,
+        'bad-request',
+        'Bad Request',
+        'Selecting VIOLATION requires at least one evidence line (FAQ-09).',
+        instance,
+      );
+    }
+
+    const sub = this.submissions.find((s) => s.id === submissionId && s.labId === labId);
+    if (!sub) {
+      throw problemError(
+        404,
+        'not-found',
+        'Not Found',
+        `Submission '${submissionId}' was not found in lab '${labId}'.`,
+        instance,
+      );
+    }
+    const target = sub.constraintVerdicts.find((cv) => cv.findingId === findingId);
+    if (!target) {
+      throw problemError(
+        404,
+        'not-found',
+        'Not Found',
+        `Constraint finding '${findingId}' was not found.`,
+        instance,
+      );
+    }
+
+    target.reviewStatus = input.decision === 'VIOLATION' ? 'APPROVED_VIOLATION' : 'DISMISSED_PASS';
+    target.taDecision = input.decision;
+    target.taDeduction =
+      input.decision === 'VIOLATION' ? (input.deduction ?? target.taConfiguredDeduction) : 0;
+    target.taEvidence = input.evidence ? input.evidence.map((e) => ({ ...e })) : null;
+    target.taReason = input.reason ?? null;
+    target.reviewedBy = user.id;
+    target.reviewedAt = new Date(this.nowProvider()).toISOString();
+
+    return structuredClone(target);
+  }
+
+  async publishLab(token: string, labId: string): Promise<PublishLabResult> {
+    const instance = `/labs/${labId}/publish`;
+    const user = this.authenticate(token, instance);
+    if (user.role !== 'TA' && user.role !== 'ADMIN') {
+      throw problemError(
+        403,
+        'forbidden',
+        'Forbidden',
+        'Chỉ Trợ giảng của lớp mới có quyền công bố điểm Lab.',
+        instance,
+      );
+    }
+    const lab = this.getLabOrThrow(labId, instance);
+    this.ensureClassAccess(user, lab.classId, instance);
+
+    if (lab.publishedAt) {
+      return { labId: lab.id, isPublished: true, publishedAt: lab.publishedAt };
+    }
+    const nowMs = this.nowProvider();
+    if (nowMs < Date.parse(lab.deadline)) {
+      throw problemError(
+        409,
+        'conflict',
+        'Conflict',
+        'Cannot publish grades before the lab deadline has passed (FAQ-12).',
+        instance,
+      );
+    }
+
+    const countingSubs = this.submissions.filter((s) => s.labId === labId && s.isCountedForGrade);
+    const unjudgedCount = countingSubs.filter((s) => s.status !== 'COMPLETED').length;
+    if (unjudgedCount > 0) {
+      throw problemError(
+        409,
+        'conflict',
+        'Conflict',
+        `Cannot publish grades while ${unjudgedCount} counted submission(s) have not finished judging (FAQ-03, FAQ-12).`,
+        instance,
+      );
+    }
+    const pendingCount = countingSubs.reduce(
+      (sum, s) =>
+        sum + s.constraintVerdicts.filter((cv) => cv.reviewStatus === 'PENDING_REVIEW').length,
+      0,
+    );
+    if (pendingCount > 0) {
+      throw problemError(
+        409,
+        'conflict',
+        'Conflict',
+        `Cannot publish grades while ${pendingCount} review item(s) remain PENDING_REVIEW (FAQ-12).`,
+        instance,
+      );
+    }
+
+    lab.publishedAt = new Date(nowMs).toISOString();
+    return { labId: lab.id, isPublished: true, publishedAt: lab.publishedAt };
   }
 }

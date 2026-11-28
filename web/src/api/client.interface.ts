@@ -8,7 +8,15 @@ import type {
   TaLabDetail,
 } from '../types/lab';
 import type { PaginatedResponse } from '../types/problem-details';
-import type { ReviewQueueItem, ReviewQueueQuery, TaSubmissionReviewView } from '../types/review';
+import type {
+  ConstraintVerdictDetail,
+  LabSubmissionLookupItem,
+  PublishLabResult,
+  ReviewQueueItem,
+  ReviewQueueQuery,
+  TaReviewDecisionInput,
+  TaSubmissionReviewView,
+} from '../types/review';
 import type {
   CreateSubmissionInput,
   StudentSubmissionSummary,
@@ -53,11 +61,23 @@ export interface LeeTkobApiClient {
   ): Promise<PaginatedResponse<StudentSubmissionSummary>>;
   getStudentSubmission(token: string, submissionId: string): Promise<StudentSubmissionView>;
 
-  // TA Review Queue
+  // TA Review Queue, Submission Lookup & Grade Publish (Task D2)
+  listLabSubmissions(
+    token: string,
+    labId: string,
+  ): Promise<{ labId: string; isPublished: boolean; submissions: LabSubmissionLookupItem[] }>;
   listReviewQueue(
     token: string,
     labId: string,
     query: ReviewQueueQuery,
   ): Promise<PaginatedResponse<ReviewQueueItem>>;
   getTaSubmissionReview(token: string, submissionId: string): Promise<TaSubmissionReviewView>;
+  reviewFinding(
+    token: string,
+    labId: string,
+    submissionId: string,
+    findingId: string,
+    input: TaReviewDecisionInput,
+  ): Promise<ConstraintVerdictDetail>;
+  publishLab(token: string, labId: string): Promise<PublishLabResult>;
 }

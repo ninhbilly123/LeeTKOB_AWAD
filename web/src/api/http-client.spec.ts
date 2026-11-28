@@ -138,4 +138,127 @@ describe('HttpApiClient', () => {
     expect(created.testCases[0].isSample).toBe(true);
     expect(created.constraints[0].description).toBe('Do not call `std::sort`.');
   });
+
+  it('supports D2 TA endpoints (listLabSubmissions, reviewFinding, publishLab) and preserves all 7 FAQ-09 unsureReason codes', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          labId: 'lab_1',
+          isPublished: false,
+          submissions: [
+            {
+              id: 'sub_1',
+              labId: 'lab_1',
+              studentId: 'usr_stu_1',
+              studentName: 'Student One',
+              status: 'COMPLETED',
+              overallVerdict: 'WA',
+              passedTests: 1,
+              totalTests: 2,
+              isCounting: true,
+              submittedAt: '2026-11-28T10:00:00.000Z',
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          labTitle: 'Merge Sort Lab',
+          isPublished: false,
+          publishedAt: null,
+          studentName: 'Student One',
+          submission: {
+            id: 'sub_1',
+            labId: 'lab_1',
+            studentId: 'usr_stu_1',
+            code: 'int main() { return 0; }',
+            status: 'COMPLETED',
+            overallVerdict: 'AC',
+            checkerStatus: 'COMPLETED',
+            passedTests: 2,
+            totalTests: 2,
+            isCounting: true,
+            submittedAt: '2026-11-28T10:00:00.000Z',
+          },
+          testVerdicts: [{ ordinal: 1, verdict: 'AC', timeMs: 10 }],
+          findings: [
+            {
+              findingId: 'fnd_1',
+              submissionId: 'sub_1',
+              constraintId: 'con_c2',
+              constraintCode: 'C2',
+              constraintText: 'Sort with merge sort.',
+              configuredDeduction: 4,
+              proposedDeduction: 0,
+              source: 'LLM',
+              verdict: 'unsure',
+              unsureReason: 'EVIDENCE_MISMATCH',
+              evidence: [],
+              reason: 'Line mismatch.',
+              reviewStatus: 'PENDING_REVIEW',
+              taDecision: null,
+              taDeduction: null,
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          id: 'fnd_1',
+          submissionId: 'sub_1',
+          constraintId: 'con_c2',
+          constraintCode: 'C2',
+          source: 'LLM',
+          verdict: 'unsure',
+          unsureReason: 'EVIDENCE_MISMATCH',
+          evidence: [],
+          reason: 'Line mismatch.',
+          reviewStatus: 'APPROVED_VIOLATION',
+          taDecision: 'VIOLATION',
+          taDeduction: 4,
+          taEvidence: [{ line: 1, text: 'int main() { return 0; }' }],
+          taReason: 'Confirmed bubble sort.',
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          labId: 'lab_1',
+          isPublished: true,
+          publishedAt: '2026-11-28T12:00:00.000Z',
+        }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new HttpApiClient('/api');
+    const allSubs = await client.listLabSubmissions('jwt-ta', 'lab_1');
+    expect(allSubs.submissions[0].studentName).toBe('Student One');
+    expect(allSubs.submissions[0].overallVerdict).toBe('WA');
+
+    const review = await client.getTaSubmissionReview('jwt-ta', 'sub_1');
+    expect(review.labTitle).toBe('Merge Sort Lab');
+    expect(review.constraintVerdicts[0].unsureReason).toBe('EVIDENCE_MISMATCH');
+    expect(review.constraintVerdicts[0].findingId).toBe('fnd_1');
+
+    const updated = await client.reviewFinding('jwt-ta', 'lab_1', 'sub_1', 'fnd_1', {
+      decision: 'VIOLATION',
+      deduction: 4,
+      evidence: [{ line: 1, text: 'int main() { return 0; }' }],
+      reason: 'Confirmed bubble sort.',
+    });
+    expect(updated.reviewStatus).toBe('APPROVED_VIOLATION');
+    expect(updated.taDeduction).toBe(4);
+
+    const published = await client.publishLab('jwt-ta', 'lab_1');
+    expect(published.isPublished).toBe(true);
+    expect(published.publishedAt).toBe('2026-11-28T12:00:00.000Z');
+  });
 });
