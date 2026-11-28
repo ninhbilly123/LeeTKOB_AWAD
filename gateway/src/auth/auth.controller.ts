@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -67,5 +68,27 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   async me(@Req() req: JwtAuthenticatedRequest): Promise<UserProfile> {
     return this.authService.getCurrentUser(req.user.id);
+  }
+}
+
+@Controller('users')
+@UseGuards(JwtAuthGuard)
+export class UsersController {
+  constructor(private readonly authService: AuthService) {}
+
+  @Get()
+  async listUsers(
+    @Req() req: JwtAuthenticatedRequest,
+    @Query('role') role?: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+  ): Promise<{ items: UserProfile[]; nextCursor: string | null }> {
+    if (req.user.role !== 'ADMIN') {
+      throw problemException(
+        HttpStatus.FORBIDDEN,
+        'Only ADMIN users may list directory users (FAQ-01).',
+      );
+    }
+    return this.authService.listUsers(role, cursor, limit);
   }
 }

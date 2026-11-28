@@ -30,6 +30,28 @@ services:
       DATABASE_URL: postgresql://${DATABASE_USER:-leetkob}:${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}@postgres:5432/${DATABASE_NAME:-leetkob}
     command: ['node', 'dist/persistence/migrate.cli.js', 'up']
 
+  # Optional one-shot demo seed (runs ONLY when ALLOW_DEMO_SEED=true; exits 0 otherwise)
+  gateway-seed:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    restart: 'no'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      gateway-migrate:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      ALLOW_DEMO_SEED: ${ALLOW_DEMO_SEED:-false}
+      DATABASE_URL: postgresql://${DATABASE_USER:-leetkob}:${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}@postgres:5432/${DATABASE_NAME:-leetkob}
+    command:
+      [
+        'sh',
+        '-c',
+        'if [ "$$ALLOW_DEMO_SEED" = "true" ]; then exec node dist/persistence/seed-demo.cli.js; else echo "[gateway-seed] ALLOW_DEMO_SEED is not true; skipping demo seed."; fi',
+      ]
+
   gateway:
     build:
       context: .
@@ -40,9 +62,12 @@ services:
         condition: service_healthy
       gateway-migrate:
         condition: service_completed_successfully
+      gateway-seed:
+        condition: service_completed_successfully
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: ${PORT:-3000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://localhost:5173}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
       PERSISTENCE_MODE: postgres
       DATABASE_URL: postgresql://${DATABASE_USER:-leetkob}:${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}@postgres:5432/${DATABASE_NAME:-leetkob}
@@ -55,6 +80,27 @@ services:
           'CMD-SHELL',
           'node -e "fetch(''http://127.0.0.1:'' + (process.env.PORT || 3000) + ''/health'').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"',
         ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Non-root Nginx frontend serving React SPA + same-origin /api/* reverse proxy to Gateway
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+      args:
+        VITE_API_MODE: http
+        VITE_API_BASE_URL: /api
+        VITE_SHOW_DEMO_ACCOUNTS: ${VITE_SHOW_DEMO_ACCOUNTS:-false}
+    restart: unless-stopped
+    depends_on:
+      gateway:
+        condition: service_healthy
+    ports:
+      - '${WEB_PORT:-8080}:8080'
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:8080/healthz >/dev/null 2>&1 || exit 1']
       interval: 10s
       timeout: 5s
       retries: 5

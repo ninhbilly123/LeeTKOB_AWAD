@@ -54,9 +54,19 @@ npm run db:migrate:down --workspace=gateway
 npm run dev --workspace=web
 ```
 
-With Docker Compose (`docker compose up --build`), the one-shot `gateway-migrate` service runs `0001_init_pa3_schema.up.sql` after `postgres` becomes healthy and before `gateway` starts. See [docs/database-plan.md](docs/database-plan.md) for the full normalized PostgreSQL 16 schema and index design.
+With Docker Compose (`docker compose up --build`), `postgres` starts first, `gateway-migrate` runs `0001_init_pa3_schema.up.sql`, `gateway-seed` optionally seeds the 5 PA#3 demo accounts when `ALLOW_DEMO_SEED=true` (otherwise exits `0`), `gateway` serves the REST API, `judge-worker` + `checker` process async C++17 judging and constraint checking, and `web` serves the React SPA at `http://localhost:8080` (`${WEB_PORT:-8080}`) with a same-origin Nginx reverse proxy (`/api/* -> http://gateway:3000/*`). Set `VITE_SHOW_DEMO_ACCOUNTS=true` when building the `web` container if you want the 5 PA#3 quick-login demo buttons on `/login`. See [docs/database-plan.md](docs/database-plan.md) for the full normalized PostgreSQL 16 schema and index design.
 
-To connect the frontend directly to a running Gateway, set `VITE_API_MODE=http` and optionally `VITE_API_BASE_URL=/api` (proxied to `VITE_GATEWAY_PROXY_TARGET`, default `http://localhost:3000`). See [docs/web-ui-plan.md](docs/web-ui-plan.md) for the full screen map, FAQ visibility boundaries, and backend API alignment list.
+For local development with Vite connected directly to a running Gateway:
+
+```bash
+# Terminal 1 — Start NestJS Gateway (configure .env with JWT_SECRET, DATABASE_URL or PERSISTENCE_MODE=memory)
+npm run dev:gateway
+
+# Terminal 2 — Start React Web UI in live HTTP mode (proxies /api/* -> VITE_GATEWAY_PROXY_TARGET, default http://localhost:3000)
+npm run dev:web:http
+```
+
+See [docs/web-ui-plan.md](docs/web-ui-plan.md) for the full screen map, FAQ visibility boundaries, and backend API alignment list.
 
 On systems where Python is named `python3`, use `python3 -m pip install -r checker/requirements-dev.txt` instead. Install the Python tools with the same interpreter used by the checks: `python` on Windows and `python3` on Linux/macOS. The `PYTHON` environment variable can select a different interpreter. Python tool versions are pinned to match CI.
 

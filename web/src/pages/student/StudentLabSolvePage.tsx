@@ -95,6 +95,7 @@ export function StudentLabSolvePage({ labId }: StudentLabSolvePageProps) {
     if (!session || !activeSub) return;
     if (activeSub.status !== 'QUEUED' && activeSub.status !== 'JUDGING') return;
 
+    const pollIntervalMs = api.mode === 'http' ? 1200 : 500;
     const timer = window.setTimeout(async () => {
       try {
         const updated = await api.getStudentSubmission(session.accessToken, activeSub.id);
@@ -106,7 +107,7 @@ export function StudentLabSolvePage({ labId }: StudentLabSolvePageProps) {
           handleAuthError(err.status);
         }
       }
-    }, 500);
+    }, pollIntervalMs);
 
     return () => window.clearTimeout(timer);
   }, [activeSub, api, handleAuthError, labId, session]);

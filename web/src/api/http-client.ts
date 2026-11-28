@@ -1,4 +1,4 @@
-import type { AuthSession, LoginInput, SessionUser } from '../types/auth';
+import type { AuthSession, LoginInput, SessionUser, UserRole } from '../types/auth';
 import type {
   ClassSummary,
   CreateClassInput,
@@ -20,6 +20,7 @@ import type {
   ReviewEvidenceLine,
   ReviewQueueBucket,
   ReviewQueueItem,
+  ReviewQueuePageResult,
   ReviewQueueQuery,
   TaDecision,
   TaReviewDecisionInput,
@@ -34,6 +35,7 @@ import type {
   SubmissionAcceptedDto,
   SubmissionPipelineStatus,
 } from '../types/submission';
+import { generateIdempotencyKey } from '../utils/idempotency';
 import type { LeeTkobApiClient } from './client.interface';
 
 interface GatewayUserDto {
@@ -60,6 +62,7 @@ interface GatewayLabDto {
   publishedAt?: string | null;
   submissionCount?: number;
   pendingReviewCount?: number;
+  latestStudentVerdict?: JudgeVerdict | null;
   testCases?: Array<{
     id: string;
     ordinal?: number;
@@ -437,13 +440,24 @@ export class HttpApiClient implements LeeTkobApiClient {
     return mapGatewayUser(dto);
   }
 
+  async listUsers(token: string, role?: UserRole): Promise<SessionUser[]> {
+    const qs = role ? `?role=${encodeURIComponent(role)}` : '';
+    const page = await this.request<PaginatedResponse<GatewayUserDto>>(`/users${qs}`, { token });
+    return (page.items ?? []).map(mapGatewayUser);
+  }
+
   listClasses(token: string, cursor?: string): Promise<PaginatedResponse<ClassSummary>> {
     const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
     return this.request<PaginatedResponse<ClassSummary>>(`/classes${qs}`, { token });
   }
 
   createClass(token: string, input: CreateClassInput): Promise<ClassSummary> {
-    return this.request<ClassSummary>('/classes', { method: 'POST', token, body: input });
+    return this.request<ClassSummary>('/classes', {
+      method: 'POST',
+      token,
+      body: input,
+      extraHeaders: { 'Idempotency-Key': generateIdempotencyKey() },
+    });
   }
 
   async listClassLabs(
@@ -467,6 +481,7 @@ export class HttpApiClient implements LeeTkobApiClient {
         publishedAt: lab.publishedAt ?? null,
         submissionCount: lab.submissionCount ?? 0,
         pendingReviewCount: lab.pendingReviewCount ?? 0,
+        latestStudentVerdict: lab.latestStudentVerdict ?? null,
       })),
       nextCursor: page.nextCursor,
     };
@@ -502,6 +517,7 @@ export class HttpApiClient implements LeeTkobApiClient {
         method: 'POST',
         token,
         body: payload,
+        extraHeaders: { 'Idempotency-Key': generateIdempotencyKey() },
       },
     );
     return mapToTaLab(created);
@@ -640,13 +656,20 @@ export class HttpApiClient implements LeeTkobApiClient {
     token: string,
     labId: string,
     query: ReviewQueueQuery,
-  ): Promise<PaginatedResponse<ReviewQueueItem>> {
+  ): Promise<ReviewQueuePageResult> {
     const params = new URLSearchParams();
     params.set('scope', query.scope);
-    const res = await this.request<{ items: GatewayReviewFindingDto[] }>(
-      `/labs/${encodeURIComponent(labId)}/review-queue?${params.toString()}`,
-      { token },
-    );
+    if (query.cursor) {
+      params.set('cursor', query.cursor);
+    }
+    const res = await this.request<{
+      labTitle?: string;
+      isPublished?: boolean;
+      publishedAt?: string | null;
+      pendingReviewCount?: number;
+      nextCursor?: string | null;
+      items: GatewayReviewFindingDto[];
+    }>(`/labs/${encodeURIComponent(labId)}/review-queue?${params.toString()}`, { token });
 
     // Group per-finding rows from D2 API by submissionId for the 3-column TA workbench
     const bySub = new Map<string, GatewayReviewFindingDto[]>();
@@ -691,7 +714,14 @@ export class HttpApiClient implements LeeTkobApiClient {
         ? grouped.filter((g) => g.queueBucket === query.bucket)
         : grouped;
 
-    return { items: filtered, nextCursor: null };
+    return {
+      items: filtered,
+      nextCursor: res.nextCursor ?? null,
+      labTitle: res.labTitle,
+      isPublished: res.isPublished,
+      publishedAt: res.publishedAt ?? null,
+      pendingReviewCount: res.pendingReviewCount,
+    };
   }
 
   async getTaSubmissionReview(

@@ -76,6 +76,7 @@ export interface LabConstraint {
 export interface Lab {
   id: string;
   classId: string;
+  classCode?: string;
   title: string;
   statement?: string;
   openedAt?: string;

@@ -1,4 +1,4 @@
-import type { AuthSession, LoginInput, SessionUser } from '../types/auth';
+import type { AuthSession, LoginInput, SessionUser, UserRole } from '../types/auth';
 import {
   MAX_CPP_CODE_BYTES,
   type ClassSummary,
@@ -20,6 +20,7 @@ import type {
   PublishLabResult,
   ReviewQueueBucket,
   ReviewQueueItem,
+  ReviewQueuePageResult,
   ReviewQueueQuery,
   TaReviewDecisionInput,
   TaSubmissionReviewView,
@@ -303,6 +304,27 @@ export class MockApiClient implements LeeTkobApiClient {
       role: user.role,
       classIds: [...user.classIds],
     };
+  }
+
+  async listUsers(token: string, role?: UserRole): Promise<SessionUser[]> {
+    const user = this.authenticate(token, '/users');
+    if (user.role !== 'ADMIN') {
+      throw problemError(
+        403,
+        'forbidden',
+        'Forbidden',
+        'Chỉ quản trị viên (ADMIN) mới có quyền xem danh sách người dùng.',
+        '/users',
+      );
+    }
+    const filtered = role ? this.users.filter((u) => u.role === role) : this.users;
+    return filtered.map((u) => ({
+      id: u.id,
+      email: u.email,
+      displayName: u.displayName,
+      role: u.role,
+      classIds: [...u.classIds],
+    }));
   }
 
   async listClasses(token: string): Promise<PaginatedResponse<ClassSummary>> {
@@ -921,7 +943,7 @@ export class MockApiClient implements LeeTkobApiClient {
     token: string,
     labId: string,
     query: ReviewQueueQuery,
-  ): Promise<PaginatedResponse<ReviewQueueItem>> {
+  ): Promise<ReviewQueuePageResult> {
     const instance = `/labs/${labId}/review-queue`;
     const user = this.authenticate(token, instance);
     if (user.role !== 'TA' && user.role !== 'ADMIN') {
@@ -978,7 +1000,23 @@ export class MockApiClient implements LeeTkobApiClient {
         maxMemoryKb: s.maxMemoryKb,
       }));
 
-    return { items: filtered, nextCursor: null };
+    const pendingReviewCount = this.submissions
+      .filter((s) => s.labId === labId && s.overallVerdict === 'AC')
+      .filter((s) => (query.scope === 'counted' ? s.isCountedForGrade : true))
+      .reduce(
+        (sum, s) =>
+          sum + s.constraintVerdicts.filter((cv) => cv.reviewStatus === 'PENDING_REVIEW').length,
+        0,
+      );
+
+    return {
+      items: filtered,
+      nextCursor: null,
+      labTitle: lab.title,
+      isPublished: Boolean(lab.publishedAt),
+      publishedAt: lab.publishedAt,
+      pendingReviewCount,
+    };
   }
 
   async getTaSubmissionReview(

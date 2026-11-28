@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useApiClient } from '../../api/api-context';
 import { useAuth } from '../../auth/auth-context-core';
 import { CodeViewer } from '../../components/CodeViewer';
@@ -132,6 +132,8 @@ export function TaReviewQueuePage({ labId }: TaReviewQueuePageProps) {
   const [publishProblem, setPublishProblem] = useState<Rfc9457ProblemDetails | null>(null);
   const [publishNotice, setPublishNotice] = useState<string | null>(null);
   const [labPublishedAt, setLabPublishedAt] = useState<string | null>(null);
+  const [queueLabTitle, setQueueLabTitle] = useState<string | null>(null);
+  const pollCountRef = useRef(0);
 
   const [loadingQueue, setLoadingQueue] = useState(true);
   const [loadingDetail, setLoadingDetail] = useState(false);
@@ -151,82 +153,139 @@ export function TaReviewQueuePage({ labId }: TaReviewQueuePageProps) {
     [logout, navigate, setExpiredMessage],
   );
 
-  const loadQueue = useCallback(async () => {
-    if (!session) return;
-    setLoadingQueue(true);
-    setQueueProblem(null);
-    try {
-      const [res, subList] = await Promise.all([
-        api.listReviewQueue(session.accessToken, labId, { scope, bucket }),
-        api.listLabSubmissions(session.accessToken, labId).catch(() => ({
-          labId,
-          isPublished: false,
-          submissions: [] as LabSubmissionLookupItem[],
-        })),
-      ]);
-      setQueue(res.items);
-      setAllSubmissions(subList.submissions);
-      setSelectedId((prev) => {
-        if (prev && res.items.some((item) => item.submissionId === prev)) {
-          return prev;
-        }
-        if (prev && subList.submissions.some((item) => item.id === prev)) {
-          return prev;
-        }
-        return res.items[0]?.submissionId ?? subList.submissions[0]?.id ?? null;
-      });
-    } catch (err) {
-      if (isApiError(err)) {
-        if (handleAuthError(err.status)) return;
-        setQueueProblem(err.problem);
+  const loadQueue = useCallback(
+    async (silent = false) => {
+      if (!session) return;
+      if (!silent) {
+        setLoadingQueue(true);
+        setQueueProblem(null);
       }
-    } finally {
-      setLoadingQueue(false);
-    }
-  }, [api, bucket, handleAuthError, labId, scope, session]);
+      try {
+        const [res, subList] = await Promise.all([
+          api.listReviewQueue(session.accessToken, labId, { scope, bucket }),
+          api.listLabSubmissions(session.accessToken, labId).catch(() => ({
+            labId,
+            isPublished: false,
+            submissions: [] as LabSubmissionLookupItem[],
+          })),
+        ]);
+        setQueue(res.items);
+        if (res.labTitle) {
+          setQueueLabTitle(res.labTitle);
+        }
+        if (res.publishedAt) {
+          setLabPublishedAt(res.publishedAt);
+        }
+        setAllSubmissions(subList.submissions);
+        setSelectedId((prev) => {
+          if (prev && res.items.some((item) => item.submissionId === prev)) {
+            return prev;
+          }
+          if (prev && subList.submissions.some((item) => item.id === prev)) {
+            return prev;
+          }
+          return res.items[0]?.submissionId ?? subList.submissions[0]?.id ?? null;
+        });
+      } catch (err) {
+        if (isApiError(err)) {
+          if (handleAuthError(err.status)) return;
+          if (!silent) {
+            setQueueProblem(err.problem);
+          }
+        }
+      } finally {
+        if (!silent) {
+          setLoadingQueue(false);
+        }
+      }
+    },
+    [api, bucket, handleAuthError, labId, scope, session],
+  );
 
   useEffect(() => {
+    pollCountRef.current = 0;
     void loadQueue();
   }, [loadQueue]);
 
   const loadDetail = useCallback(
-    async (submissionId: string) => {
+    async (submissionId: string, silent = false) => {
       if (!session) return;
-      setLoadingDetail(true);
-      setDetailProblem(null);
-      setReviewActionProblem(null);
-      setActiveLine(null);
+      if (!silent) {
+        setLoadingDetail(true);
+        setDetailProblem(null);
+        setReviewActionProblem(null);
+        setActiveLine(null);
+      }
       try {
         const res = await api.getTaSubmissionReview(session.accessToken, submissionId);
         setDetail(res);
         if (res.publishedAt) {
           setLabPublishedAt(res.publishedAt);
         }
-        const nextDrafts: Record<string, FindingDraftState> = {};
-        for (const cv of res.constraintVerdicts) {
-          const key = cv.findingId ?? cv.constraintId;
-          nextDrafts[key] = buildInitialDraft(cv);
-        }
-        setDrafts(nextDrafts);
+        setDrafts((prev) => {
+          const nextDrafts: Record<string, FindingDraftState> = {};
+          for (const cv of res.constraintVerdicts) {
+            const key = cv.findingId ?? cv.constraintId;
+            nextDrafts[key] = silent && prev[key] ? prev[key] : buildInitialDraft(cv);
+          }
+          return nextDrafts;
+        });
       } catch (err) {
         if (isApiError(err)) {
           if (handleAuthError(err.status)) return;
-          setDetailProblem(err.problem);
+          if (!silent) {
+            setDetailProblem(err.problem);
+          }
         }
       } finally {
-        setLoadingDetail(false);
+        if (!silent) {
+          setLoadingDetail(false);
+        }
       }
     },
     [api, handleAuthError, session],
   );
 
   useEffect(() => {
+    pollCountRef.current = 0;
     if (!selectedId) {
       setDetail(null);
       return;
     }
     void loadDetail(selectedId);
   }, [loadDetail, selectedId]);
+
+  const hasPendingPipeline =
+    allSubmissions.some((s) => s.status === 'QUEUED' || s.status === 'JUDGING') ||
+    detail?.checkerStatus === 'PENDING';
+
+  // Bounded live polling while async Judge/Checker pipeline is still processing
+  useEffect(() => {
+    if (!session || !hasPendingPipeline) {
+      return;
+    }
+    if (pollCountRef.current >= 40) {
+      return;
+    }
+    const intervalMs = api.mode === 'http' ? 1500 : 500;
+    const timer = window.setTimeout(() => {
+      pollCountRef.current += 1;
+      void loadQueue(true);
+      if (selectedId) {
+        void loadDetail(selectedId, true);
+      }
+    }, intervalMs);
+    return () => window.clearTimeout(timer);
+  }, [
+    api.mode,
+    hasPendingPipeline,
+    loadDetail,
+    loadQueue,
+    selectedId,
+    session,
+    detail,
+    allSubmissions,
+  ]);
 
   const highlightedLines = useMemo(() => {
     if (!detail) return [];
@@ -342,7 +401,7 @@ export function TaReviewQueuePage({ labId }: TaReviewQueuePageProps) {
         <div>
           <Link to="/ta/classes">&larr; Quay lại danh sách bài Lab</Link>
           <h1 id="main-content" tabIndex={-1} style={{ margin: '0.2rem 0 0', fontSize: '1.35rem' }}>
-            Hàng chờ Soát Ràng buộc (TA) — {detail?.labTitle ?? labId}
+            Hàng chờ Soát Ràng buộc (TA) — {queueLabTitle ?? detail?.labTitle ?? labId}
           </h1>
           <div className="field-hint">
             Trạng thái:{' '}
@@ -352,6 +411,11 @@ export function TaReviewQueuePage({ labId }: TaReviewQueuePageProps) {
                 : 'NHÁP — Chưa công bố cho sinh viên (Syllabus Rule / FAQ-08)'}
             </strong>
           </div>
+          {hasPendingPipeline && (
+            <div className="field-hint" role="status" aria-live="polite">
+              Đang tự động cập nhật tiến trình chấm test / phân tích ràng buộc...
+            </div>
+          )}
         </div>
 
         <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'end', flexWrap: 'wrap' }}>
@@ -416,8 +480,12 @@ export function TaReviewQueuePage({ labId }: TaReviewQueuePageProps) {
           <label htmlFor="ta-submission-lookup">Tra cứu trực tiếp theo Submission ID (demo)</label>
           <input
             id="ta-submission-lookup"
+            name="submissionLookup"
             type="text"
             className="mono"
+            autoCorrect="off"
+            autoCapitalize="none"
+            spellCheck={false}
             placeholder="Nhập mã bài nộp (ví dụ: sub_...)"
             value={lookupInput}
             onChange={(e) => setLookupInput(e.target.value)}
@@ -460,7 +528,7 @@ export function TaReviewQueuePage({ labId }: TaReviewQueuePageProps) {
           {publishNotice}
         </div>
       )}
-      {queueProblem && <ProblemBanner problem={queueProblem} onRetry={loadQueue} />}
+      {queueProblem && <ProblemBanner problem={queueProblem} onRetry={() => void loadQueue()} />}
 
       {loadingQueue ? (
         <LoadingPanel message="Đang tải hàng chờ soát ràng buộc..." />
