@@ -198,6 +198,19 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
     return mapUserRow(row, classIds);
   }
 
+  async findUserByEmail(email: string): Promise<StoredUser | undefined> {
+    const res = await this.requirePool().query(
+      'SELECT * FROM users WHERE LOWER(email) = LOWER($1) AND is_active = TRUE',
+      [email],
+    );
+    const row = res.rows[0];
+    if (!row) {
+      return undefined;
+    }
+    const classIds = await this.resolveUserClasses(String(row.id), String(row.role));
+    return mapUserRow(row, classIds);
+  }
+
   async findUserById(id: string): Promise<StoredUser | undefined> {
     const res = await this.requirePool().query(
       'SELECT * FROM users WHERE id = $1 AND is_active = TRUE',
@@ -260,6 +273,109 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
       inviteCode: row.invite_code ? String(row.invite_code) : null,
       createdBy: row.created_by ? String(row.created_by) : null,
     }));
+  }
+
+  async listClassSummariesForUser(
+    userId: string,
+    role: string,
+  ): Promise<
+    Array<
+      ClassRecord & {
+        taIds: string[];
+        studentCount: number;
+        labCount: number;
+        createdAt: string;
+      }
+    >
+  > {
+    const baseSelect = `
+      SELECT
+        c.id,
+        c.code,
+        c.name,
+        c.term,
+        c.invite_code,
+        c.created_by,
+        c.created_at,
+        COALESCE(
+          (SELECT array_agg(cs2.ta_id ORDER BY cs2.ta_id ASC)
+           FROM class_staff cs2
+           WHERE cs2.class_id = c.id),
+          ARRAY[]::text[]
+        ) AS ta_ids,
+        (SELECT COUNT(*)::int
+         FROM class_enrollments ce2
+         WHERE ce2.class_id = c.id AND ce2.status = 'ACTIVE') AS student_count,
+        (SELECT COUNT(*)::int
+         FROM labs l2
+         WHERE l2.class_id = c.id) AS lab_count
+      FROM classes c
+    `;
+    let res: PgQueryResult;
+    if (role === 'ADMIN') {
+      res = await this.requirePool().query(`${baseSelect} ORDER BY c.created_at DESC, c.id DESC`);
+    } else if (role === 'TA') {
+      res = await this.requirePool().query(
+        `${baseSelect}
+         INNER JOIN class_staff cs ON cs.class_id = c.id
+         WHERE cs.ta_id = $1
+         ORDER BY c.created_at DESC, c.id DESC`,
+        [userId],
+      );
+    } else {
+      res = await this.requirePool().query(
+        `${baseSelect}
+         INNER JOIN class_enrollments ce ON ce.class_id = c.id
+         WHERE ce.student_id = $1 AND ce.status = 'ACTIVE'
+         ORDER BY c.created_at DESC, c.id DESC`,
+        [userId],
+      );
+    }
+    return res.rows.map((row) => ({
+      id: String(row.id),
+      code: String(row.code),
+      name: String(row.name),
+      term: String(row.term),
+      inviteCode: row.invite_code ? String(row.invite_code) : null,
+      createdBy: row.created_by ? String(row.created_by) : null,
+      taIds: Array.isArray(row.ta_ids) ? row.ta_ids.map((id) => String(id)) : [],
+      studentCount: Number(row.student_count ?? 0),
+      labCount: Number(row.lab_count ?? 0),
+      createdAt:
+        row.created_at instanceof Date
+          ? row.created_at.toISOString()
+          : String(row.created_at ?? new Date().toISOString()),
+    }));
+  }
+
+  async createClass(cls: ClassRecord, taIds: ReadonlyArray<string> = []): Promise<void> {
+    const client = await this.requirePool().connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        `INSERT INTO classes (id, code, name, term, invite_code, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [cls.id, cls.code, cls.name, cls.term, cls.inviteCode ?? null, cls.createdBy],
+      );
+      for (const taId of taIds) {
+        await client.query(
+          `INSERT INTO class_staff (class_id, ta_id)
+           VALUES ($1, $2)
+           ON CONFLICT (class_id, ta_id) DO NOTHING`,
+          [cls.id, taId],
+        );
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        // Ignore rollback failure
+      }
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   // --- Labs (Normalized lab_test_cases & lab_constraints) ---

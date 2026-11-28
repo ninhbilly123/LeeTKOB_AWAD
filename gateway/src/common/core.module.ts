@@ -4,6 +4,7 @@ import { JWT_VERIFICATION_SECRET, jwtVerificationSecret } from './auth.constants
 import { loadGatewayConfig } from './config';
 import { PostgresPersistence } from '../persistence/postgres.store';
 import { AuthStore } from '../auth/auth.store';
+import { ClassesStore } from '../classes/classes.store';
 import { LabsStore } from '../labs/labs.store';
 import { SubmissionStore } from '../submissions/submissions.store';
 
@@ -23,6 +24,7 @@ import { SubmissionStore } from '../submissions/submissions.store';
       },
     },
     AuthStore,
+    ClassesStore,
     LabsStore,
     SubmissionStore,
     { provide: JWT_VERIFICATION_SECRET, useFactory: jwtVerificationSecret },
@@ -31,6 +33,7 @@ import { SubmissionStore } from '../submissions/submissions.store';
     JwtModule,
     PostgresPersistence,
     AuthStore,
+    ClassesStore,
     LabsStore,
     SubmissionStore,
     JWT_VERIFICATION_SECRET,

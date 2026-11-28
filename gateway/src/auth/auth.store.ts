@@ -32,11 +32,33 @@ export class AuthStore {
     return user ? { ...user, classIds: [...user.classIds] } : undefined;
   }
 
+  findUserByEmail(email: string): StoredUser | undefined {
+    const normalized = email.trim().toLowerCase();
+    for (const user of this.users.values()) {
+      if (user.email.toLowerCase() === normalized) {
+        return { ...user, classIds: [...user.classIds] };
+      }
+    }
+    return undefined;
+  }
+
   async findUserByUsernameAsync(username: string): Promise<StoredUser | undefined> {
     if (this.usePostgres) {
       return this.postgres!.findUserByUsername(username);
     }
     return this.findUserByUsername(username);
+  }
+
+  async findUserByIdentifierAsync(identifier: string): Promise<StoredUser | undefined> {
+    const trimmed = identifier.trim();
+    if (this.usePostgres) {
+      const byUsername = await this.postgres!.findUserByUsername(trimmed);
+      if (byUsername) {
+        return byUsername;
+      }
+      return this.postgres!.findUserByEmail(trimmed);
+    }
+    return this.findUserByUsername(trimmed) ?? this.findUserByEmail(trimmed);
   }
 
   findUserById(id: string): StoredUser | undefined {

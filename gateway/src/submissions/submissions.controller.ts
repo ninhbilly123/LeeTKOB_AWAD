@@ -263,3 +263,36 @@ export class SubmissionsController {
     return this.submissionsService.publishLabForTa(labId, req.user.id, req.user.role);
   }
 }
+
+/**
+ * Direct submission tracking lookup (`GET /submissions/:submissionId`) used by the Web UI
+ * (`web/src/api/http-client.ts`) — delegates to the exact same role/ownership & Syllabus Rule
+ * checks as `/labs/:labId/submissions/:submissionId` and `/review`.
+ */
+@Controller('submissions')
+@UseGuards(JwtAuthGuard)
+export class SubmissionLookupController {
+  constructor(private readonly submissionsService: SubmissionsService) {}
+
+  @Get(':submissionId')
+  async getById(@Param('submissionId') submissionId: string, @Req() req: JwtAuthenticatedRequest) {
+    const sub = await this.submissionsService.getSubmission(submissionId);
+    if (!sub) {
+      throw problemException(HttpStatus.NOT_FOUND, `Submission '${submissionId}' was not found.`);
+    }
+    if (req.user.role === 'STUDENT') {
+      return this.submissionsService.getSubmissionResultForUser(
+        sub.labId,
+        sub.id,
+        req.user.id,
+        req.user.role,
+      );
+    }
+    return this.submissionsService.getSubmissionReviewForTa(
+      sub.labId,
+      sub.id,
+      req.user.id,
+      req.user.role,
+    );
+  }
+}

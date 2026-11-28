@@ -6,10 +6,17 @@ import { AppModule } from '../../src/app.module';
 import { configureApplication } from '../../src/configure-app';
 import { JWT_VERIFICATION_SECRET } from '../../src/common/auth.constants';
 import { AuthStore } from '../../src/auth/auth.store';
+import { ClassesStore } from '../../src/classes/classes.store';
 import { LabsStore } from '../../src/labs/labs.store';
 import { SubmissionStore } from '../../src/submissions/submissions.store';
 import { UserRole } from '../../src/submissions/submissions.types';
-import { authStore, labsStore, submissionStore, resetAllStores } from './submissions.fixtures';
+import {
+  authStore,
+  classesStore,
+  labsStore,
+  submissionStore,
+  resetAllStores,
+} from './submissions.fixtures';
 
 const testSecret = randomBytes(32).toString('hex');
 export function bearerFor(
@@ -31,6 +38,8 @@ export async function createTestApp(): Promise<NestExpressApplication> {
     .useValue(testSecret)
     .overrideProvider(AuthStore)
     .useValue(authStore)
+    .overrideProvider(ClassesStore)
+    .useValue(classesStore)
     .overrideProvider(LabsStore)
     .useValue(labsStore)
     .overrideProvider(SubmissionStore)

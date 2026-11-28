@@ -22,8 +22,12 @@ function isNonEmptyString(val: unknown): val is string {
   return typeof val === 'string' && val.trim().length > 0;
 }
 
-function parseCreateLabPayload(body: Record<string, unknown>): CreateLabInput {
-  if (!body || !isNonEmptyString(body.classId) || !isNonEmptyString(body.title)) {
+export function parseCreateLabPayload(
+  body: Record<string, unknown>,
+  overrideClassId?: string,
+): CreateLabInput {
+  const effectiveClassId = overrideClassId ?? body?.classId;
+  if (!body || !isNonEmptyString(effectiveClassId) || !isNonEmptyString(body.title)) {
     throw problemException(HttpStatus.BAD_REQUEST, 'Fields classId and title are required.');
   }
   if (!isNonEmptyString(body.statement)) {
@@ -138,7 +142,7 @@ function parseCreateLabPayload(body: Record<string, unknown>): CreateLabInput {
   }
 
   return {
-    classId: body.classId.trim(),
+    classId: effectiveClassId.trim(),
     title: body.title.trim(),
     statement: body.statement,
     openedAt,
