@@ -436,3 +436,11 @@ Team Members:
 - **Changed**: Added the feature spec outline, the five areas to check during spec review, and the mapping from numbered acceptance criteria to tests. Used submission idempotency as a LeeTKOB example and checked it against the contract and the existing concurrency test.
 - **Rejected**: Copying the restaurant example's endpoint and error format into LeeTKOB. Its API behavior is specific to the classroom example.
 - **Validation**: Verified the eight spec sections, both Markdown links, and a clean `git diff --check`. Application tests were skipped for this documentation edit.
+## 2026-11-28 — Add a skill for writing API contracts and contract tests
+
+- **Tool**: Codex.
+- **Asked for**: Combine the IA#3 CONTRACT.md, the applicable rubric, and LeeTKOB engineering rules into a reusable skill and require it in AGENTS.md.
+- **Kept**: The LeeTKOB submission contract's own authorization and replay behavior.
+- **Changed**: Added the five-section HTTP outline, a separate path for internal payloads, and a test workflow that checks both responses and persisted outcomes. Registered the skill in the repo catalog and AGENTS.md.
+- **Rejected**: Copying the IA#3 menu service's status codes and replay headers into LeeTKOB. These details belong to each endpoint's approved contract.
+- **Validation**: The skill-creator validator passed. Verified the five IA#3 sections, ten links, and the submission examples against the existing contract and test sources. Application tests were skipped for this documentation-only change.
