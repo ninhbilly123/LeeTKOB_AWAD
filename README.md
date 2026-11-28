@@ -149,6 +149,16 @@ docker run --rm --network none --memory 512m --pids-limit 64 \
 node leetkob-eval/eval.mjs --data leetkob-eval --predictions predictions-model-off.jsonl
 ```
 
+### Team-Authored Eval Cases (`leetkob-eval-team/`, Task D3)
+
+Additional team-authored Accepted C++17 solutions live in a separate directory [leetkob-eval-team/](leetkob-eval-team/) (matching the exact `problems/`, `solutions/`, `labels.jsonl` layout so `leetkob-eval/` stays byte-for-byte intact). It contains `2` unseen problems (`stack-brackets`, `kth-element`), `8` Accepted solutions (`16` pairs), and covers all `5` eval tags (`obvious`, `disguised`, `trap`, `injection`, `style`).
+
+```bash
+# Run offline checker (MODEL_OFF=1) on the team cases and score with unmodified eval.mjs
+MODEL_OFF=1 python -m src --data ../leetkob-eval-team --output ../team-predictions-model-off.jsonl
+node leetkob-eval/eval.mjs --data leetkob-eval-team --predictions team-predictions-model-off.jsonl
+```
+
 ### Real-Model Dev-Set Run & 80-Submission Cost Arithmetic (PA#3)
 
 - **Evidence folder:** [docs/evidence/pa3-real-run/](docs/evidence/pa3-real-run/)
