@@ -5,9 +5,11 @@ import { randomBytes } from 'node:crypto';
 import { AppModule } from '../../src/app.module';
 import { configureApplication } from '../../src/configure-app';
 import { JWT_VERIFICATION_SECRET } from '../../src/common/auth.constants';
+import { AuthStore } from '../../src/auth/auth.store';
+import { LabsStore } from '../../src/labs/labs.store';
 import { SubmissionStore } from '../../src/submissions/submissions.store';
 import { UserRole } from '../../src/submissions/submissions.types';
-import { submissionStore } from './submissions.fixtures';
+import { authStore, labsStore, submissionStore, resetAllStores } from './submissions.fixtures';
 
 const testSecret = randomBytes(32).toString('hex');
 export function bearerFor(
@@ -23,10 +25,14 @@ export function bearerFor(
 }
 
 export async function createTestApp(): Promise<NestExpressApplication> {
-  submissionStore.reset();
+  resetAllStores();
   const fixture = await Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(JWT_VERIFICATION_SECRET)
     .useValue(testSecret)
+    .overrideProvider(AuthStore)
+    .useValue(authStore)
+    .overrideProvider(LabsStore)
+    .useValue(labsStore)
     .overrideProvider(SubmissionStore)
     .useValue(submissionStore)
     .compile();

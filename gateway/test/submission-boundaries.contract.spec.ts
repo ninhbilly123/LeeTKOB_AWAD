@@ -3,7 +3,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { SubmissionsService } from '../src/submissions/submissions.service';
 import { createTestApp, bearerFor } from './support/test-app';
-import { submissionStore } from './support/submissions.fixtures';
+import { labsStore, submissionStore } from './support/submissions.fixtures';
 
 describe('Submission contract security and boundary regressions', () => {
   let app: INestApplication;
@@ -104,7 +104,7 @@ describe('Submission contract security and boundary regressions', () => {
   it('returns the original result for an accepted submission retried after its deadline', async () => {
     const key = randomUUID();
     const first = await post(key).send({ code }).expect(201);
-    submissionStore.getLab(lab)!.deadline = new Date(Date.now() - 1).toISOString();
+    labsStore.getLab(lab)!.deadline = new Date(Date.now() - 1).toISOString();
     const retry = await post(key).send({ code }).expect(201);
     expect(retry.body).toEqual(first.body);
     expect(submissionStore.getAllSubmissions()).toHaveLength(1);

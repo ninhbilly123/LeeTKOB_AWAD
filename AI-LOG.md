@@ -304,6 +304,83 @@ Team Members:
 
 ---
 
+## 2026-11-24 — Define Checker Output Schema and Implement C++ AST Hard-Rule Checker (K1) (Huỳnh Đăng Khoa)
+- **Tool**: Antigravity.
+- **Asked for**: Finalize the shared output schema (`docs/contract/checker-output.md`) for Gateway/Worker/Checker/Eval alignment, then write tests first and implement the C++ AST hard-rule checker (`K1`) on a dedicated branch (`feat/checker-hard-rules`).
+- **Kept**:
+  - Created `docs/contract/checker-output.md` specifying `CheckerResult`, `ConstraintFinding`, `EvidenceLine`, `UnsureReason` (`FAQ-09`), strict no-deduction LLM schema (`FAQ-11`), review queue boundaries (`FAQ-02`, `FAQ-08`, `FAQ-10`, `FAQ-12`), and CLI JSONL prediction format.
+  - Added typed schema definitions in `checker/src/models.py` and syntax-aware C++ AST inspection in `checker/src/hard_rules.py` using `tree-sitter` and `tree-sitter-cpp`, covering comments/strings, user-defined `sort` (namespace/global/method), `<algorithm>` included solely for `std::swap`, `using namespace std;`, `using std::sort;`, namespace aliases, `#define` macros, and function pointers.
+  - Added 11 unit and trap tests in `checker/tests/test_hard_rules.py` before implementing `hard_rules.py`.
+- **Changed**:
+  - Replaced the PA#2 placeholder's string-serialized `"evidence": "[]"` with structured `EvidenceLine` objects (`{"line": int, "text": str}`) and explicit `unsureReason: "MODEL_OFF"` for un-evaluated semantic constraints to align with `docs/contract/checker-output.md` and `FAQ-09`.
+  - Pinned `tree-sitter==0.27.0` and `tree-sitter-cpp==0.23.4` in `checker/requirements.txt` and referenced `-r requirements.txt` from `checker/requirements-dev.txt` so CI installs runtime dependencies cleanly without modifying `.github/workflows/ci.yml`.
+  - Consolidated duplicated `template_type` / `template_function` traversal branches spotted during diff review.
+- **Rejected**:
+  - Rejected raw text/regex scanning for `std::sort` or `#include <algorithm>`, which falsely flags comments, string literals, student-defined `sort`, and `<algorithm>` included only for `std::swap` (detected via AST inspection and trap test cases in `checker/tests/test_hard_rules.py`).
+  - Rejected keeping any `deduction` or `score` field in checker/LLM output schemas (enforcing `FAQ-11` and the PA#3 syllabus rule).
+- **Validation**:
+  - Verified test-first red run (`pytest` collection failed before `hard_rules.py` implementation), then ran all four canonical quality gates (`PYTHON=.venv/bin/python npm run lint`, `format:check`, `typecheck`, `test`): all exited `0` (Gateway Jest 37/37, Web Vitest 1/1, Checker Pytest 11/11, Ruff lint/format clean, `mypy --strict` clean on 4 files).
+  - Imported the unmodified `fithcmus/awad-leetkob-eval` dev set into `leetkob-eval/` (`eval.mjs` SHA-256 `c836edd8713521bb...`, `labels.jsonl` SHA-256 `262cda7b0ef5612e...`). Initial eval run caught two missed generic ban-list patterns (C++ loop statements / `#define` loop macros and member iterator calls like `.rbegin()`) plus a struct method trap (`s.sort()`). Fixed all three generically in `checker/src/hard_rules.py` with tests in `checker/tests/test_hard_rules.py` (12/12 Pytest passing). Final dev-set hard-rule eval: **0 wrongful deductions**, **55/55 ban-list pairs decided** (15/15 ban-list violations caught with exact line evidence), and 47/47 semantic pairs routed to `unsure`.
+
+---
+
+## 2026-11-24 — Implement Gemini Semantic Checker, Prompt Sanitizer, and Schema/Timeout Guardrails (K2) (Huỳnh Đăng Khoa)
+- **Tool**: Antigravity.
+- **Asked for**: Implement the LLM semantic constraint pipeline (`K2`) in two separate commits on `feat/checker-model-limits`: (1) sanitized prompt builder + Gemini HTTP transport + orchestrator skipping hard-rule pairs, and (2) tests-first schema validation, evidence verification, and timeout guardrails.
+- **Kept**:
+  - `checker/src/sanitizer.py`: strips C++ comments via `tree-sitter-cpp` byte spans while preserving newlines and 1-based line numbers, redacts student identifiers, strips `deduction` fields from prompt constraints, and wraps code inside `<submission_code>` data tags.
+  - `checker/src/llm_client.py`: Gemini REST transport using stdlib `urllib.request` with `x-goog-api-key` header (read from env only), extracting `responseId` / `x-goog-request-id`, token counts, latency, and estimated USD cost, plus `LlmTransport` protocol for offline `FakeLlmTransport` testing.
+  - `checker/src/guardrails.py` & `checker/src/semantic_checker.py`: strict JSON schema check (`additionalProperties` forbidden, no `deduction`/`score`/`marks`), evidence line bounds/text check mapping back to original source lines, timeout/provider-error/cost-cap/model-off fallbacks routing to `unsure` with `FAQ-09` `unsureReason` codes.
+- **Changed**:
+  - Adjusted the prompt test assertion in `checker/tests/test_semantic_checker.py` from `"deduction" not in sent_prompt` to `'"deduction"' not in sent_prompt` because the system instruction itself explicitly forbids returning a `deduction` field while the `<constraints>` JSON payload excludes the `"deduction"` property.
+  - Extracted shared `make_unsure_findings` helper in `checker/src/guardrails.py` to remove duplicate fallback builders in `checker/src/semantic_checker.py`.
+  - Accepted evidence text matching either the original line or comment-stripped sanitized line, then mapped the saved `evidence[].text` back to the exact original `.cpp` line so `eval.mjs` and TA review never mismatch on trailing comments.
+- **Rejected**:
+  - Rejected passing `GEMINI_API_KEY` in query string parameters (kept in `x-goog-api-key` header so keys never appear in URLs) and rejected adding unpinned third-party HTTP SDKs when Python stdlib `urllib.request` suffices offline.
+  - Rejected calling any real model inside unit tests (detected and enforced via `FakeLlmTransport`, `_TimeoutTransport`, `_ErrorTransport` in `checker/tests/test_semantic_checker.py` and `checker/tests/test_guardrails.py`).
+- **Validation**:
+  - Verified test-first red run on `checker/tests/test_guardrails.py` before writing `checker/src/guardrails.py`.
+  - Ran all four canonical quality gates (`PYTHON=.venv/bin/python npm run lint`, `format:check`, `typecheck`, `test`) after final edits: all passed (Gateway Jest 37/37, Web Vitest 1/1, Checker Pytest 23/23, `mypy --strict` clean on 10 source files).
+
+---
+
+## 2026-11-24 — Add Checker Dataset CLI, Non-Root Dockerfile, and Offline MODEL_OFF=1 Verification (K3) (Huỳnh Đăng Khoa)
+- **Tool**: Antigravity.
+- **Asked for**: Implement a single-command dataset CLI (`checker/src/cli.py`), non-root pinned `Dockerfile`, and `MODEL_OFF=1` offline mode on branch `feat/checker-cli-eval`, updating `README.md` with CLI and Docker instructions.
+- **Kept**:
+  - Added `checker/src/cli.py` and `checker/src/__main__.py` accepting `--data` (or positional path), `-o/--output`, `--call-log`, `--model`, `--timeout`, `--delay-ms`, and `MODEL_OFF=1`, reading only `problems/<id>/statement.md`, `problems/<id>/constraints.json`, and `solutions/<id>/*.cpp` (never `labels.jsonl`).
+  - Added `checker/tests/test_cli.py` (3 offline tests written before `cli.py`).
+  - Added `checker/Dockerfile` pinned to `python:3.12-slim-bookworm`, running as non-root `USER 10001:10001`, with `checker/.dockerignore` excluding caches, tests, and `.env*`.
+  - Documented local CLI, Docker build, `docker run --network none` with `MODEL_OFF=1`, and `eval.mjs` verification in `README.md`.
+- **Changed**:
+  - Supported both file output (`--output`) and stdout streaming in `checker/src/cli.py` so `docker run ... -v /path:/data:ro` works cleanly even when the host dataset mount is read-only and the container runs as non-root `10001:10001`.
+- **Rejected**:
+  - Rejected using `:latest` base image or running container as `root`, and rejected baking `.env` or `GEMINI_API_KEY` into the Docker image (enforced via `.dockerignore` and `docs/engineering-rules.md` checks).
+- **Validation**:
+  - Verified test-first red run on `checker/tests/test_cli.py` before creating `checker/src/cli.py`.
+  - Built `leetkob-checker:pa3` and ran `docker run --rm --network none --memory 512m --pids-limit 64 -e MODEL_OFF=1 -v "$(pwd)/leetkob-eval:/data:ro" leetkob-checker:pa3 --data /data`, scored by `node leetkob-eval/eval.mjs`: 0 wrongful deductions, 15/15 ban-list violations caught, 47/47 semantic pairs `unsure` (exit code `1`, zero schema errors).
+  - Ran all four canonical quality gates (`PYTHON=.venv/bin/python npm run lint`, `format:check`, `typecheck`, `test`): all passed (Gateway Jest 37/37, Web Vitest 1/1, Checker Pytest 26/26, `mypy --strict` clean on 13 source files).
+
+---
+
+## 2026-11-24 — Commit Real-Model Dev-Set Eval Run and 80-Submission Cost Arithmetic (K3) (Huỳnh Đăng Khoa)
+- **Tool**: Antigravity (CLI orchestration) + Gemini API (`gemini-3.1-flash-lite` via `gemini-3.1-flash-lite-preview`).
+- **Asked for**: Record the real Gemini API dev-set run (`predictions.jsonl`, `eval.mjs` report/summary, and `call-log.jsonl` with real provider request IDs), compute the 80-submission lab cost arithmetic in `README.md` and `AI-LOG.md`, commit the evidence, push `feat/checker-cli-eval`, and update `TASK-08` on the tracking sheet.
+- **Model & Cost Arithmetic**:
+  - **Model used**: `gemini-3.1-flash-lite` (`gemini-3.1-flash-lite-preview`), free tier (`GEMINI_API_KEY` loaded from gitignored `.env` into shell env only).
+  - **Measured across `32` `OK` semantic calls (`39` semantic calls attempted; `8` `reverse-recursive` solutions decided 100% by AST hard rules with `0` LLM calls)**: `27,308` input tokens (`853.375` avg/call) and `3,911` output tokens (`122.219` avg/call).
+  - **Actual free-tier spend**: `$0.00`.
+  - **Estimated paid-tier equivalent** (`$0.10 / 1M` input, `$0.40 / 1M` output): `$0.0042952` for the `32` `OK` calls (`$0.000134225` per semantic submission). Scaled to **1 lab of 80 Accepted submissions** (assuming all 80 require an LLM semantic check): `80 × (27,308 / 32) = 68,270` input tokens (`$0.006827`) + `80 × (3,911 / 32) = 9,777.5` output tokens (`$0.003911`) = **`$0.010738` (~`$0.011 USD` per lab)**.
+- **Kept**:
+  - Committed the exact run artifacts from `docs/evidence/pa3-real-run/` (`predictions.jsonl`, `call-log.jsonl`, `eval-report.txt`, `eval-summary.json`), reporting `wrongful = 0`, `recall = 86.5% (32/37)`, `unsure = 6.9% (7/102)`.
+  - Verified all `32` `OK` entries in `call-log.jsonl` carry real provider `requestId` values (e.g., `FlEFa7y8EO231e8Pj7aXoQg`), and `0` prompts contain comments (`//`, `/*`) or hard-rule ban-list constraints (`reverse-recursive` had `0` calls).
+- **Changed**:
+  - Updated `README.md` Section 7 with the exact dev-set real-run folder, reported metrics, and 80-submission cost calculation (separating `$0.00` free-tier actual spend from paid-tier estimates).
+- **Rejected**:
+  - Rejected cherry-picking or manually editing `predictions.jsonl` / `eval-report.txt` after the command was pasted twice and the second run hit `5 PROVIDER_ERROR` + `2 TIMEOUT` burst failures on the free tier; kept the actual files on disk and verified that guardrails safely routed all 7 failed calls to `unsure` with `0` wrongful deductions (detected by inspecting `statuses` and `requestId` counts in `call-log.jsonl`).
+- **Validation**:
+  - Re-scored `docs/evidence/pa3-real-run/predictions.jsonl` with `node leetkob-eval/eval.mjs` (`exit 1` in PA#3, matching `0` wrongful, `86.5%` recall, `6.9%` unsure) and verified `eval.mjs`/`labels.jsonl` SHA-256 prefixes remain unmodified (`c836edd8713521bb`, `262cda7b0ef5612e`).
+  - Re-ran all four canonical quality gates (`PYTHON=.venv/bin/python npm run lint`, `format:check`, `typecheck`, `test`): all passed.
 ## 2026-11-24 — Add standardized workspace skills directory under .agents/skills/ (Phạm An Ninh)
 - **Tool**: Antigravity.
 - **Asked for**: Create a properly structured workspace skills directory for the team based on the proposal and PA#3 rubric.
@@ -330,3 +407,21 @@ Team Members:
   - Adding third-party routing/Markdown npm packages (Tier-2) when zero-dependency History API routing and React-node Markdown rendering satisfy PA#3 cleanly without XSS risk.
   - Exposing hidden test cases or pre-publish checker verdicts in Student mock payloads or hiding them only with CSS.
 - **Validation**: Ran all four canonical root commands (`npm run lint`, `npm run format:check`, `npm run typecheck`, `npm run test` covering `gateway` 37 Jest tests, `web` 8 Vitest tests including negative privacy assertions, and `checker` Pytest) plus `npm run build --workspace=web` offline on branch `feat/web-pa3-ui`.
+
+---
+
+## 2026-11-27 — Audit and harden PostgreSQL schema, migrations, worker outbox, and Docker packaging (`feat/database-hardening`) (Phạm An Ninh)
+- **Tool**: Antigravity.
+- **Asked for**: Review the database design and configuration on `origin/feat/auth_and_labs` against project docs/rules (`AGENTS.md`, `docs/engineering-rules.md`, `PA3_rubric.md`, `FAQ.md`, `docs/contract/checker-output.md`), document findings and a remediation plan in `docs/database-plan.md`, and implement the approved fixes on a new branch.
+- **Kept**:
+  - Merged `origin/feat/auth_and_labs` cleanly onto `feat/database-hardening` (branched from `main`) and preserved dual-mode in-memory fallback for 100% offline unit/contract tests.
+  - Replaced runtime `CREATE TABLE` + auto-seeding in `onModuleInit()` with explicit paired SQL migrations (`gateway/migrations/0001_init_pa3_schema.up.sql` and `.down.sql`, `SET lock_timeout = '2s'`), migration CLI (`db:migrate`, `db:migrate:down`), and guarded demo seed CLI (`db:seed:demo`, blocked in production unless `ALLOW_DEMO_SEED=true`).
+  - Normalized the PostgreSQL 16 schema to 14 tables with full `FOREIGN KEY`, `CHECK`, `UNIQUE`, integer `deduction_centipoints` (`0..1000`), SQL-level `is_hidden = FALSE` filtering in `getStudentLab()`, Partial Unique Index `uniq_submissions_counting` (`FAQ-04`), 9 query-driven indexes, and full `constraint_findings` / `model_call_logs` / `audit_logs` tables aligned with `docs/contract/checker-output.md`.
+  - Fixed the `is_counting` concurrency race via per-student `pg_advisory_xact_lock`, added 3-phase worker outbox methods (`claimNextJob` with `FOR UPDATE SKIP LOCKED`, `requeueStaleJobs`, `recordJobFailure` with retry/backoff & terminal `JUDGE_ERROR`, idempotent `recordJudgeResult` & `recordCheckerResult` with `UNIQUE (submission_id, request_id)` and automatic `FAQ-10` 10% `pass` sampling), added `statement` to `SubmissionJob` for `checker/`, eliminated the $N+1$ query in `getAllLabs()` via `ANY($1::text[])` batching, converted `saveLab()` to non-destructive upserts (`ON CONFLICT (id) DO UPDATE`) so `constraint_findings` are never cascade-deleted, added D2 read/review/publish methods (`getSubmissionTestResults`, `listStudentSubmissions`, `listLabReviewQueue`, `reviewConstraintFinding` with DB-enforced `FAQ-09` `ta_evidence` check, `publishLabAtomic`), added startup config validation (`gateway/src/common/config.ts`), upgraded `GET /health` to verify `SELECT 1` (`503` on DB failure), created multi-stage non-root `gateway/Dockerfile`, fixed `.dockerignore`, and added the one-shot `gateway-migrate` service to `docker-compose.yml`.
+- **Changed**:
+  - Kept `idempotency_records` `PRIMARY KEY (student_id, idempotency_key)` with `lab_id REFERENCES labs(id)` and per-student advisory lock after verifying PA#2 regression test `gateway/test/submission-boundaries.contract.spec.ts` explicitly requires cross-lab reuse of the same key by the same student to return `409 idempotency-conflict`.
+  - Removed obsolete `MONGODB_URI=` from `.env.example` and removed deprecated `gateway/src/persistence/schema.ts`.
+- **Rejected**:
+  - Keeping auto-DDL or weak demo password seeding inside `onModuleInit()` (violates Session 04/08 separate migrations and production security hygiene).
+  - Storing lab deductions/scores as floating-point columns or keeping hidden test cases embedded in a `labs.test_cases` JSONB blob.
+- **Validation**: Ran `npm run lint`, `npm run format:check`, `npm run typecheck`, `npm run test` (all Gateway Jest suites including new `database-hardening.spec.ts`, Web Vitest, and Checker Pytest), and `npm run build --workspace=gateway` offline on branch `feat/database-hardening`.
