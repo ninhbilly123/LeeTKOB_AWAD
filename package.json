@@ -10,7 +10,7 @@
     "test": "node scripts/run-check.mjs test",
     "dev:gateway": "npm run start:dev --workspace=gateway",
     "dev:web": "npm run dev --workspace=web",
-    "dev:web:http": "node -e \"const { spawn } = require('node:child_process'); spawn(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', 'dev', '--workspace=web'], { stdio: 'inherit', env: { ...process.env, VITE_API_MODE: 'http', VITE_API_BASE_URL: process.env.VITE_API_BASE_URL || '/api' } }).on('exit', (c) => process.exit(c ?? 0))\""
+    "dev:web:http": "node -e \"const { spawn } = require('node:child_process'); spawn(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', 'dev', '--workspace=web'], { stdio: 'inherit', shell: process.platform === 'win32', env: { ...process.env, VITE_API_MODE: 'http', VITE_API_BASE_URL: process.env.VITE_API_BASE_URL || '/api' } }).on('exit', (c) => process.exit(c ?? 0))\""
   },
   "workspaces": [
     "gateway",
