@@ -1,0 +1,12 @@
+[
+  {
+    "id": "C1",
+    "text": "Do not call a library sorting or selection function: `std::nth_element`, `std::sort`, `std::stable_sort`, `std::partial_sort`, `qsort`.",
+    "deduction": 3
+  },
+  {
+    "id": "C2",
+    "text": "Find the k-th smallest element with a partition-based quickselect you wrote yourself: partition around a pivot and recurse or loop only on the side containing k. Sorting the entire array first (e.g. bubble sort, insertion sort, selection sort, merge sort, or inserting into a sorted structure) does not satisfy this constraint, whatever the function is called.",
+    "deduction": 4
+  }
+]

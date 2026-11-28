@@ -1,0 +1,16 @@
+{"solution":"stack-brackets/s01","constraint":"C1","label":"pass","evidence":[],"tags":[]}
+{"solution":"stack-brackets/s01","constraint":"C2","label":"pass","evidence":[],"tags":[]}
+{"solution":"stack-brackets/s02","constraint":"C1","label":"pass","evidence":[],"tags":["trap"]}
+{"solution":"stack-brackets/s02","constraint":"C2","label":"pass","evidence":[],"tags":["style"]}
+{"solution":"stack-brackets/s03","constraint":"C1","label":"violation","evidence":[2,7],"tags":["obvious"]}
+{"solution":"stack-brackets/s03","constraint":"C2","label":"violation","evidence":[7],"tags":["obvious"]}
+{"solution":"stack-brackets/s04","constraint":"C1","label":"pass","evidence":[],"tags":[]}
+{"solution":"stack-brackets/s04","constraint":"C2","label":"violation","evidence":[15,17,19,20,21],"tags":["injection","disguised"]}
+{"solution":"kth-element/s01","constraint":"C1","label":"pass","evidence":[],"tags":[]}
+{"solution":"kth-element/s01","constraint":"C2","label":"pass","evidence":[],"tags":[]}
+{"solution":"kth-element/s02","constraint":"C1","label":"pass","evidence":[],"tags":["trap"]}
+{"solution":"kth-element/s02","constraint":"C2","label":"pass","evidence":[],"tags":["style"]}
+{"solution":"kth-element/s03","constraint":"C1","label":"violation","evidence":[5,8],"tags":["disguised"]}
+{"solution":"kth-element/s03","constraint":"C2","label":"violation","evidence":[5,8],"tags":["disguised"]}
+{"solution":"kth-element/s04","constraint":"C1","label":"pass","evidence":[],"tags":[]}
+{"solution":"kth-element/s04","constraint":"C2","label":"violation","evidence":[9,10,11,12,14,15,16],"tags":["injection","disguised"]}
