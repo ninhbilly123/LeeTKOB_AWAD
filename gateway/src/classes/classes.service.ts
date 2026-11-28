@@ -4,6 +4,7 @@ import { AuthStore } from '../auth/auth.store';
 import { problemException } from '../common/http-problems';
 import { CreateLabInput } from '../labs/dto/create-lab.dto';
 import { LabsService, LabStudentView } from '../labs/labs.service';
+import { SubmissionStore } from '../submissions/submissions.store';
 import { Lab, UserRole } from '../submissions/submissions.types';
 import { ClassesStore, ClassSummaryRecord } from './classes.store';
 
@@ -82,6 +83,7 @@ export class ClassesService {
     private readonly classesStore: ClassesStore,
     private readonly authStore: AuthStore,
     private readonly labsService: LabsService,
+    private readonly submissionStore: SubmissionStore,
   ) {}
 
   async listClasses(
@@ -143,12 +145,39 @@ export class ClassesService {
     role: UserRole,
     rawCursor?: string,
     rawLimit?: string,
-  ): Promise<CursorPage<Lab | LabStudentView>> {
+  ): Promise<
+    CursorPage<(Lab | LabStudentView) & { submissionCount?: number; pendingReviewCount?: number }>
+  > {
     const { offset, limit } = parsePaginationParams(rawCursor, rawLimit);
     await this.assertClassReadable(classId, userId, role);
     const allLabs = await this.labsService.listLabs(userId, role);
     const filtered = allLabs.filter((lab) => lab.classId === classId);
-    return paginateItems(filtered, offset, limit);
+    const page = paginateItems(filtered, offset, limit);
+    if (role === 'STUDENT') {
+      return page;
+    }
+    const enrichedItems = await Promise.all(
+      page.items.map(async (lab) => {
+        const [subs, queueEntries] = await Promise.all([
+          this.submissionStore.listLabSubmissionsAsync(lab.id),
+          this.submissionStore.listLabReviewQueueAsync(lab.id, 'counted'),
+        ]);
+        const pendingReviewCount = queueEntries.reduce(
+          (sum, entry) =>
+            sum + entry.findings.filter((f) => f.reviewStatus === 'PENDING_REVIEW').length,
+          0,
+        );
+        return {
+          ...lab,
+          submissionCount: subs.length,
+          pendingReviewCount,
+        };
+      }),
+    );
+    return {
+      items: enrichedItems,
+      nextCursor: page.nextCursor,
+    };
   }
 
   async createClassLab(

@@ -964,11 +964,7 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
    * Called after recordCheckerResult(), after a non-AC submission supersedes a prior AC one,
    * and immediately before checking PENDING_REVIEW in publishLabAtomic().
    */
-  private async rebalanceLabPassSample(
-    client: PgClientLike,
-    labId: string,
-    preferSubmissionId: string | null = null,
-  ): Promise<void> {
+  private async rebalanceLabPassSample(client: PgClientLike, labId: string): Promise<void> {
     await client.query(
       `WITH pass_stats AS (
          SELECT
@@ -994,14 +990,14 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
            AND s.overall_verdict = 'AC'
            AND cf.verdict = 'pass'
            AND cf.is_sampled_pass = FALSE
-         ORDER BY ($2::text IS NOT NULL AND cf.submission_id = $2) DESC, cf.id ASC
+         ORDER BY RANDOM()
          LIMIT (SELECT deficit FROM needed)
        )
        UPDATE constraint_findings
        SET is_sampled_pass = TRUE,
            review_status = CASE WHEN review_status = 'NOT_QUEUED' THEN 'PENDING_REVIEW' ELSE review_status END
        WHERE id IN (SELECT id FROM candidates)`,
-      [labId, preferSubmissionId],
+      [labId],
     );
   }
 
@@ -1073,7 +1069,7 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
         );
         const labId = subRes.rows[0]?.lab_id ? String(subRes.rows[0].lab_id) : null;
         if (labId) {
-          await this.rebalanceLabPassSample(client, labId, null);
+          await this.rebalanceLabPassSample(client, labId);
         }
       }
 
@@ -1185,7 +1181,7 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
         );
       }
 
-      await this.rebalanceLabPassSample(client, input.labId, input.submissionId);
+      await this.rebalanceLabPassSample(client, input.labId);
 
       await client.query(
         `UPDATE submissions
@@ -1281,6 +1277,26 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
     const client = await this.requirePool().connect();
     try {
       await client.query('BEGIN');
+      const beforeRes = await client.query(
+        `SELECT review_status, ta_decision, ta_deduction_centipoints, ta_evidence, ta_reason
+         FROM constraint_findings
+         WHERE id = $1 AND submission_id = $2
+         FOR UPDATE`,
+        [input.findingId, input.submissionId],
+      );
+      const beforeRow = beforeRes.rows[0];
+      const beforeState = beforeRow
+        ? {
+            reviewStatus: String(beforeRow.review_status),
+            taDecision: beforeRow.ta_decision ? String(beforeRow.ta_decision) : null,
+            taDeduction:
+              beforeRow.ta_deduction_centipoints != null
+                ? Number(beforeRow.ta_deduction_centipoints) / 100
+                : null,
+            taReason: beforeRow.ta_reason ? String(beforeRow.ta_reason) : null,
+          }
+        : null;
+
       const res = await client.query(
         `UPDATE constraint_findings
          SET review_status = $2,
@@ -1312,17 +1328,19 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
       }
 
       await client.query(
-        `INSERT INTO audit_logs (id, lab_id, submission_id, actor_id, action, after_state, reason)
-         VALUES ($1, $2, $3, $4, 'TA_REVIEW_FINDING', $5::jsonb, $6)`,
+        `INSERT INTO audit_logs (id, lab_id, submission_id, actor_id, action, before_state, after_state, reason)
+         VALUES ($1, $2, $3, $4, 'TA_REVIEW_FINDING', $5::jsonb, $6::jsonb, $7)`,
         [
           `aud_${randomUUID()}`,
           input.labId,
           input.submissionId,
           input.actorId,
+          beforeState ? JSON.stringify(beforeState) : null,
           JSON.stringify({
             findingId: input.findingId,
+            reviewStatus,
             decision: input.decision,
-            deduction: input.deduction,
+            deduction: input.decision === 'VIOLATION' ? input.deduction : 0,
           }),
           input.reason ?? null,
         ],
@@ -1372,8 +1390,41 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
         );
       }
 
+      // Ensure all counted submissions have finished judging (FAQ-03, FAQ-12)
+      const unjudgedRes = await client.query<{ unjudged_count: string }>(
+        `SELECT COUNT(*)::int AS unjudged_count
+         FROM submissions
+         WHERE lab_id = $1 AND is_counting = TRUE AND pipeline_status <> 'COMPLETED'`,
+        [labId],
+      );
+      const unjudgedCount = Number(unjudgedRes.rows[0]?.unjudged_count ?? 0);
+      if (unjudgedCount > 0) {
+        throw problemException(
+          HttpStatus.CONFLICT,
+          `Cannot publish grades while ${unjudgedCount} counted submission(s) have not finished judging (FAQ-03, FAQ-12).`,
+        );
+      }
+
+      // Ensure all counted AC submissions have finished constraint checking (Syllabus Rule, FAQ-12)
+      const uncheckedRes = await client.query<{ unchecked_count: string }>(
+        `SELECT COUNT(*)::int AS unchecked_count
+         FROM submissions
+         WHERE lab_id = $1
+           AND is_counting = TRUE
+           AND overall_verdict = 'AC'
+           AND checker_status <> 'COMPLETED'`,
+        [labId],
+      );
+      const uncheckedCount = Number(uncheckedRes.rows[0]?.unchecked_count ?? 0);
+      if (uncheckedCount > 0) {
+        throw problemException(
+          HttpStatus.CONFLICT,
+          `Cannot publish grades while ${uncheckedCount} counted AC submission(s) have not finished constraint checking.`,
+        );
+      }
+
       // Ensure FAQ-10 10% pass sampling is balanced across counting AC submissions before publish
-      await this.rebalanceLabPassSample(client, labId, null);
+      await this.rebalanceLabPassSample(client, labId);
 
       const pendingRes = await client.query<{ pending_count: string }>(
         `SELECT COUNT(*) AS pending_count

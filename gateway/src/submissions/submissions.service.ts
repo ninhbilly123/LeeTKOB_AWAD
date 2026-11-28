@@ -20,10 +20,13 @@ export interface SubmissionSummaryItem {
   id: string;
   labId: string;
   studentId: string;
+  studentName?: string;
   status: SubmissionStatus;
   overallVerdict: JudgeVerdict | null;
   passedTests: number;
   totalTests: number;
+  maxTimeMs: number | null;
+  maxMemoryKb: number | null;
   isCounting: boolean;
   submittedAt: string;
 }
@@ -49,6 +52,8 @@ export interface StudentSubmissionResultView {
   overallVerdict: JudgeVerdict | null;
   passedTests: number;
   totalTests: number;
+  maxTimeMs: number | null;
+  maxMemoryKb: number | null;
   isCounting: boolean;
   isPublished: boolean;
   publishedAt?: string;
@@ -62,6 +67,7 @@ export interface TaReviewFindingView {
   findingId: string;
   submissionId: string;
   studentId: string;
+  studentName?: string;
   isCounting: boolean;
   submittedAt: string;
   constraintId: string;
@@ -86,13 +92,19 @@ export interface TaReviewFindingView {
 
 export interface TaReviewQueueResponse {
   labId: string;
+  labTitle: string;
   scope: 'counted' | 'all';
   isPublished: boolean;
+  publishedAt: string | null;
   pendingReviewCount: number;
   items: TaReviewFindingView[];
 }
 
 export interface TaSubmissionReviewResponse {
+  labTitle: string;
+  isPublished: boolean;
+  publishedAt: string | null;
+  studentName: string;
   submission: Submission;
   testVerdicts: SubmissionTestResult[];
   findings: TaReviewFindingView[];
@@ -152,20 +164,28 @@ export class SubmissionsService {
         ? await this.store.listStudentSubmissionsAsync(labId, userId)
         : await this.store.listLabSubmissionsAsync(labId);
 
-    return {
-      labId: lab.id,
-      isPublished: Boolean(lab.isPublished),
-      submissions: raw.map((s) => ({
+    const studentNameCache = new Map<string, string>();
+    const submissions = await Promise.all(
+      raw.map(async (s) => ({
         id: s.id,
         labId: s.labId,
         studentId: s.studentId,
+        studentName: await this.resolveStudentDisplayName(s.studentId, studentNameCache),
         status: s.status,
         overallVerdict: s.overallVerdict ?? null,
         passedTests: s.passedTests ?? 0,
         totalTests: s.totalTests ?? 0,
+        maxTimeMs: s.maxTimeMs ?? null,
+        maxMemoryKb: s.maxMemoryKb ?? null,
         isCounting: Boolean(s.isCounting),
         submittedAt: s.submittedAt,
       })),
+    );
+
+    return {
+      labId: lab.id,
+      isPublished: Boolean(lab.isPublished),
+      submissions,
     };
   }
 
@@ -203,6 +223,8 @@ export class SubmissionsService {
       overallVerdict: submission.overallVerdict ?? null,
       passedTests: submission.passedTests ?? 0,
       totalTests: submission.totalTests ?? 0,
+      maxTimeMs: submission.maxTimeMs ?? null,
+      maxMemoryKb: submission.maxMemoryKb ?? null,
       isCounting: Boolean(submission.isCounting),
       isPublished,
       submittedAt: submission.submittedAt,
@@ -249,9 +271,11 @@ export class SubmissionsService {
     }
 
     const finalScore =
-      submission.overallVerdict === 'AC'
-        ? Math.max(0, Math.round((10 - totalDeduction) * 100) / 100)
-        : 0;
+      submission.manualScore !== null && submission.manualScore !== undefined
+        ? submission.manualScore
+        : submission.overallVerdict === 'AC'
+          ? Math.max(0, Math.round((10 - totalDeduction) * 100) / 100)
+          : 0;
 
     return {
       ...baseView,
@@ -271,7 +295,12 @@ export class SubmissionsService {
     const entries = await this.store.listLabReviewQueueAsync(labId, scope);
 
     const items: TaReviewFindingView[] = [];
+    const studentNameCache = new Map<string, string>();
     for (const entry of entries) {
+      const studentName = await this.resolveStudentDisplayName(
+        entry.submission.studentId,
+        studentNameCache,
+      );
       const relevantFindings =
         scope === 'counted'
           ? entry.findings.filter(
@@ -284,7 +313,7 @@ export class SubmissionsService {
           : entry.findings;
 
       for (const finding of relevantFindings) {
-        items.push(this.toTaReviewFindingView(lab, entry.submission, finding));
+        items.push(this.toTaReviewFindingView(lab, entry.submission, finding, studentName));
       }
     }
 
@@ -294,8 +323,10 @@ export class SubmissionsService {
 
     return {
       labId: lab.id,
+      labTitle: lab.title,
       scope,
       isPublished: Boolean(lab.isPublished),
+      publishedAt: lab.publishedAt ?? null,
       pendingReviewCount,
       items,
     };
@@ -316,13 +347,20 @@ export class SubmissionsService {
       );
     }
 
-    const testVerdicts = await this.store.getSubmissionTestResultsAsync(submission.id);
-    const findings = await this.store.getSubmissionFindingsAsync(submission.id);
+    const [testVerdicts, findings, studentName] = await Promise.all([
+      this.store.getSubmissionTestResultsAsync(submission.id),
+      this.store.getSubmissionFindingsAsync(submission.id),
+      this.resolveStudentDisplayName(submission.studentId),
+    ]);
 
     return {
+      labTitle: lab.title,
+      isPublished: Boolean(lab.isPublished),
+      publishedAt: lab.publishedAt ?? null,
+      studentName,
       submission,
       testVerdicts,
-      findings: findings.map((f) => this.toTaReviewFindingView(lab, submission, f)),
+      findings: findings.map((f) => this.toTaReviewFindingView(lab, submission, f, studentName)),
     };
   }
 
@@ -335,6 +373,12 @@ export class SubmissionsService {
     payload: TaReviewDecisionPayload,
   ): Promise<ConstraintFindingRecord> {
     const lab = await this.requireTaOrAdminLabAccess(labId, actorId, role);
+    if (lab.isPublished && (!payload.reason || payload.reason.trim().length === 0)) {
+      throw problemException(
+        HttpStatus.BAD_REQUEST,
+        'Modifying a review decision after Publish requires a non-empty reason (FAQ-12).',
+      );
+    }
     const submission = await this.store.getSubmissionAsync(submissionId);
     if (!submission || submission.labId !== labId) {
       throw problemException(
@@ -433,10 +477,25 @@ export class SubmissionsService {
     return this.requireLabAccess(labId, userId, role);
   }
 
+  private async resolveStudentDisplayName(
+    studentId: string,
+    cache?: Map<string, string>,
+  ): Promise<string> {
+    const cached = cache?.get(studentId);
+    if (cached) {
+      return cached;
+    }
+    const user = await this.authStore.findUserByIdAsync(studentId);
+    const displayName = user?.displayName ?? user?.username ?? studentId;
+    cache?.set(studentId, displayName);
+    return displayName;
+  }
+
   private toTaReviewFindingView(
     lab: Lab,
     submission: Submission,
     finding: ConstraintFindingRecord,
+    studentName?: string,
   ): TaReviewFindingView {
     const constraintDef = (lab.constraints ?? []).find(
       (c) => (c.code ?? c.id) === finding.constraintCode,
@@ -448,6 +507,7 @@ export class SubmissionsService {
       findingId: finding.id,
       submissionId: finding.submissionId,
       studentId: submission.studentId,
+      studentName: studentName ?? submission.studentId,
       isCounting: Boolean(submission.isCounting),
       submittedAt: submission.submittedAt,
       constraintId: finding.constraintId,

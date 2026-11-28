@@ -1,5 +1,5 @@
 import { HttpStatus, Injectable, Optional } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import { AuthStore } from '../auth/auth.store';
 import { problemException } from '../common/http-problems';
 import {
@@ -22,6 +22,18 @@ import {
   TaReviewQueueEntry,
 } from './submissions.types';
 
+export interface InMemoryAuditLogEntry {
+  id: string;
+  labId: string;
+  submissionId: string | null;
+  actorId: string;
+  action: 'TA_REVIEW_FINDING' | 'PUBLISH_LAB_GRADES';
+  beforeState: Record<string, unknown> | null;
+  afterState: Record<string, unknown> | null;
+  reason: string | null;
+  createdAt: string;
+}
+
 /** Dual-mode submission & worker outbox store: PostgreSQL when enabled, in-memory for offline tests. */
 @Injectable()
 export class SubmissionStore {
@@ -30,6 +42,7 @@ export class SubmissionStore {
   private readonly findings = new Map<string, ConstraintFindingRecord[]>();
   private readonly jobs = new Map<string, SubmissionJob>();
   private readonly idempotencyRecords = new Map<string, IdempotencyRecord>();
+  private readonly auditLogs: InMemoryAuditLogEntry[] = [];
 
   constructor(
     private readonly labsStore: LabsStore,
@@ -47,6 +60,11 @@ export class SubmissionStore {
     this.findings.clear();
     this.jobs.clear();
     this.idempotencyRecords.clear();
+    this.auditLogs.length = 0;
+  }
+
+  getAuditLogs(): InMemoryAuditLogEntry[] {
+    return this.auditLogs.map((entry) => ({ ...entry }));
   }
 
   // --- Submissions ---
@@ -122,6 +140,14 @@ export class SubmissionStore {
     const countingSubs = [...this.submissions.values()].filter(
       (s) => s.labId === labId && Boolean(s.isCounting),
     );
+    const unjudgedCount = countingSubs.filter((s) => s.status !== 'COMPLETED').length;
+    if (unjudgedCount > 0) {
+      throw problemException(
+        HttpStatus.CONFLICT,
+        `Cannot publish grades while ${unjudgedCount} counted submission(s) have not finished judging (FAQ-03, FAQ-12).`,
+      );
+    }
+
     const uncheckedAcCount = countingSubs.filter(
       (s) => s.overallVerdict === 'AC' && s.checkerStatus !== 'COMPLETED',
     ).length;
@@ -131,6 +157,9 @@ export class SubmissionStore {
         `Cannot publish grades while ${uncheckedAcCount} counted AC submission(s) have not finished constraint checking.`,
       );
     }
+
+    // Ensure FAQ-10 10% pass sampling is balanced across counting AC submissions before publish
+    this.rebalanceLabPassSampleInMemory(labId);
 
     let pendingCount = 0;
     for (const sub of countingSubs) {
@@ -149,6 +178,17 @@ export class SubmissionStore {
       ...lab,
       isPublished: true,
       publishedAt,
+    });
+    this.auditLogs.push({
+      id: `aud_${randomUUID()}`,
+      labId,
+      submissionId: null,
+      actorId,
+      action: 'PUBLISH_LAB_GRADES',
+      beforeState: { isPublished: false, publishedAt: null },
+      afterState: { isPublished: true, publishedAt },
+      reason: null,
+      createdAt: publishedAt,
     });
     return publishedAt;
   }
@@ -225,7 +265,7 @@ export class SubmissionStore {
     return 'RETRYING';
   }
 
-  private rebalanceLabPassSampleInMemory(labId: string, preferSubmissionId?: string): void {
+  private rebalanceLabPassSampleInMemory(labId: string): void {
     const countingSubs = [...this.submissions.values()].filter(
       (s) => s.labId === labId && s.isCounting && s.overallVerdict === 'AC',
     );
@@ -234,23 +274,22 @@ export class SubmissionStore {
     );
     const requiredSampled = Math.ceil(0.1 * allPassFindings.length);
     let currentSampled = allPassFindings.filter((f) => f.isSampledPass).length;
-    const candidates = [...allPassFindings].sort((a, b) => {
-      if (preferSubmissionId) {
-        const aPref = a.submissionId === preferSubmissionId ? 0 : 1;
-        const bPref = b.submissionId === preferSubmissionId ? 0 : 1;
-        if (aPref !== bPref) return aPref - bPref;
-      }
-      return a.id.localeCompare(b.id);
-    });
-    for (const pf of candidates) {
+    if (currentSampled >= requiredSampled) {
+      return;
+    }
+    // Fisher-Yates random shuffle among unsampled pass findings (FAQ-10)
+    const unsampled = allPassFindings.filter((f) => !f.isSampledPass);
+    for (let i = unsampled.length - 1; i > 0; i -= 1) {
+      const j = randomInt(i + 1);
+      [unsampled[i], unsampled[j]] = [unsampled[j], unsampled[i]];
+    }
+    for (const pf of unsampled) {
       if (currentSampled >= requiredSampled) break;
-      if (!pf.isSampledPass) {
-        pf.isSampledPass = true;
-        if (pf.reviewStatus === 'NOT_QUEUED') {
-          pf.reviewStatus = 'PENDING_REVIEW';
-        }
-        currentSampled += 1;
+      pf.isSampledPass = true;
+      if (pf.reviewStatus === 'NOT_QUEUED') {
+        pf.reviewStatus = 'PENDING_REVIEW';
       }
+      currentSampled += 1;
     }
   }
 
@@ -332,7 +371,7 @@ export class SubmissionStore {
       sub.promptVersion = input.promptVersion ?? null;
       sub.checkedAt = input.checkedAt ?? new Date().toISOString();
     }
-    this.rebalanceLabPassSampleInMemory(input.labId, input.submissionId);
+    this.rebalanceLabPassSampleInMemory(input.labId);
 
     const job = [...this.jobs.values()].find((j) => j.submissionId === input.submissionId);
     if (job) {
@@ -377,13 +416,38 @@ export class SubmissionStore {
         `Constraint finding '${input.findingId}' was not found.`,
       );
     }
+    const beforeState = {
+      reviewStatus: target.reviewStatus,
+      taDecision: target.taDecision,
+      taDeduction: target.taDeduction,
+      taReason: target.taReason,
+    };
+    const reviewedAt = new Date().toISOString();
     target.reviewStatus = input.decision === 'VIOLATION' ? 'APPROVED_VIOLATION' : 'DISMISSED_PASS';
     target.taDecision = input.decision;
     target.taDeduction = input.decision === 'VIOLATION' ? input.deduction : 0;
     target.taEvidence = input.evidence ? input.evidence.map((e) => ({ ...e })) : null;
     target.taReason = input.reason ?? null;
     target.reviewedBy = input.actorId;
-    target.reviewedAt = new Date().toISOString();
+    target.reviewedAt = reviewedAt;
+
+    this.auditLogs.push({
+      id: `aud_${randomUUID()}`,
+      labId: input.labId,
+      submissionId: input.submissionId,
+      actorId: input.actorId,
+      action: 'TA_REVIEW_FINDING',
+      beforeState,
+      afterState: {
+        findingId: target.id,
+        reviewStatus: target.reviewStatus,
+        decision: target.taDecision,
+        deduction: target.taDeduction,
+      },
+      reason: target.taReason,
+      createdAt: reviewedAt,
+    });
+
     return { ...target };
   }
 

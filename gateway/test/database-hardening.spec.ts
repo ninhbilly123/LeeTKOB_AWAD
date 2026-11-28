@@ -630,5 +630,52 @@ describe('Database Hardening: Migrations, Config, Centipoints & Worker Outbox', 
       ).length;
       expect(afterPublishRebalance).toBe(beforePublishRebalance + 1);
     });
+
+    it('AC5 (PostgreSQL): publishLabAtomic rejects 409 & rolls back when counted submissions are unjudged or unchecked', async () => {
+      for (const scenario of ['unjudged', 'unchecked'] as const) {
+        const queries: string[] = [];
+        const client: PgClientLike = {
+          query: async <R extends Record<string, unknown>>(
+            text: string,
+          ): Promise<PgQueryResult<R>> => {
+            queries.push(text.trim());
+            if (text.includes('SELECT deadline, published_at FROM labs')) {
+              return {
+                rows: [
+                  { deadline: '2026-01-01T00:00:00.000Z', published_at: null },
+                ] as unknown as R[],
+                rowCount: 1,
+              };
+            }
+            if (text.includes('AS unjudged_count')) {
+              return {
+                rows: [{ unjudged_count: scenario === 'unjudged' ? '1' : '0' }] as unknown as R[],
+                rowCount: 1,
+              };
+            }
+            if (text.includes('AS unchecked_count')) {
+              return {
+                rows: [{ unchecked_count: scenario === 'unchecked' ? '2' : '0' }] as unknown as R[],
+                rowCount: 1,
+              };
+            }
+            return { rows: [], rowCount: 0 };
+          },
+          release: jest.fn(),
+        };
+        const pool: PgPoolLike = {
+          query: client.query,
+          connect: async () => client,
+          end: async () => undefined,
+        };
+        const pg = new PostgresPersistence(undefined, pool);
+
+        await expect(
+          pg.publishLabAtomic('lab_1', 'usr_ta_01', Date.parse('2026-11-28T00:00:00.000Z')),
+        ).rejects.toThrow(HttpException);
+        expect(queries.some((q) => q === 'ROLLBACK')).toBe(true);
+        expect(queries.some((q) => q.includes('UPDATE labs SET published_at'))).toBe(false);
+      }
+    });
   });
 });
