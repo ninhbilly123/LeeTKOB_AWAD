@@ -4,12 +4,64 @@ import { DEMO_ACCOUNTS } from '../api/mock-seed';
 import { defaultHomePathForRole, useAuth } from '../auth/auth-context-core';
 import { ProblemBanner } from '../components/ProblemBanner';
 import { useRouter } from '../router/router-core';
+import type { UserRole } from '../types/auth';
 import { isApiError, type Rfc9457ProblemDetails } from '../types/problem-details';
+
+interface QuickDemoAccount {
+  email: string;
+  password: string;
+  displayName: string;
+  role: UserRole;
+  summary: string;
+}
+
+const BACKEND_DEMO_ACCOUNTS: QuickDemoAccount[] = [
+  {
+    email: 'admin@leetkob.edu.vn',
+    password: 'admin123',
+    displayName: 'Admin Hệ Thống',
+    role: 'ADMIN',
+    summary: 'Quản lý danh sách lớp học và gán Trợ giảng phụ trách (DB seed)',
+  },
+  {
+    email: 'ta1@leetkob.edu.vn',
+    password: 'ta123',
+    displayName: 'TA 1 (CSC10002-24CLC1)',
+    role: 'TA',
+    summary: 'Phụ trách lớp CSC10002-24CLC1 — tạo Lab, soát ràng buộc & Publish',
+  },
+  {
+    email: 'ta2@leetkob.edu.vn',
+    password: 'ta123',
+    displayName: 'TA 2 (CSC10002-24CLC2)',
+    role: 'TA',
+    summary: 'Phụ trách lớp CSC10002-24CLC2 — kiểm thử cách ly 403 khác lớp',
+  },
+  {
+    email: 'student1@leetkob.edu.vn',
+    password: 'student123',
+    displayName: 'Sinh viên 1 (CSC10002-24CLC1)',
+    role: 'STUDENT',
+    summary: 'Ghi danh lớp CSC10002-24CLC1 — đọc đề, nộp C++17 & xem điểm sau Publish',
+  },
+  {
+    email: 'student2@leetkob.edu.vn',
+    password: 'student123',
+    displayName: 'SV Phạm Gia Hân (CSC10002-24CLC1)',
+    role: 'STUDENT',
+    summary: 'Ghi danh lớp CSC10002-24CLC1 — kiểm thử cách ly bài nộp giữa các sinh viên',
+  },
+];
 
 export function LoginPage() {
   const api = useApiClient();
   const { login, expiredMessage } = useAuth();
   const { navigate } = useRouter();
+
+  const showDemoAccounts =
+    api.mode === 'mock' || import.meta.env.VITE_SHOW_DEMO_ACCOUNTS === 'true';
+  const demoAccounts: QuickDemoAccount[] =
+    api.mode === 'mock' ? DEMO_ACCOUNTS : BACKEND_DEMO_ACCOUNTS;
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -87,8 +139,12 @@ export function LoginPage() {
               <label htmlFor="login-email">Email hoặc tên đăng nhập</label>
               <input
                 id="login-email"
+                name="email"
                 type="text"
                 autoComplete="username"
+                autoCorrect="off"
+                autoCapitalize="none"
+                spellCheck={false}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 onBlur={() => setTouched((prev) => ({ ...prev, email: true }))}
@@ -108,6 +164,7 @@ export function LoginPage() {
               <label htmlFor="login-password">Mật khẩu</label>
               <input
                 id="login-password"
+                name="password"
                 type="password"
                 autoComplete="current-password"
                 value={password}
@@ -136,10 +193,12 @@ export function LoginPage() {
           </form>
         </section>
 
-        {api.mode === 'mock' && (
+        {showDemoAccounts && (
           <section className="card" aria-labelledby="demo-accounts-heading">
             <h2 id="demo-accounts-heading" style={{ marginTop: 0, fontSize: '1.15rem' }}>
-              5 Tài khoản mẫu PA#3 (Chế độ Mock)
+              {api.mode === 'mock'
+                ? '5 Tài khoản mẫu PA#3 (Chế độ Mock)'
+                : '5 Tài khoản mẫu PA#3 (Chế độ Demo HTTP)'}
             </h2>
             <p className="field-hint" style={{ marginTop: '-0.25rem', marginBottom: '0.85rem' }}>
               Bấm chọn nhanh để kiểm thử cách ly quyền giữa Admin, 2 TA khác lớp và 2 Sinh viên.
@@ -147,7 +206,7 @@ export function LoginPage() {
             <ul
               style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: '0.6rem' }}
             >
-              {DEMO_ACCOUNTS.map((acc) => (
+              {demoAccounts.map((acc) => (
                 <li
                   key={acc.email}
                   style={{

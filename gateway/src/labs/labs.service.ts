@@ -2,6 +2,7 @@ import { HttpStatus, Injectable, Optional } from '@nestjs/common';
 import { createHash, randomUUID } from 'node:crypto';
 import { problemException } from '../common/http-problems';
 import { AuthStore } from '../auth/auth.store';
+import { ClassesStore } from '../classes/classes.store';
 import { PostgresPersistence } from '../persistence/postgres.store';
 import { SubmissionStore } from '../submissions/submissions.store';
 import { LabsStore } from './labs.store';
@@ -15,6 +16,7 @@ const REVIEW_NOTICE =
 export interface LabStudentView {
   id: string;
   classId: string;
+  classCode?: string;
   title: string;
   statement: string;
   openedAt?: string;
@@ -38,6 +40,7 @@ export class LabsService {
     private readonly labsStore: LabsStore,
     @Optional() private readonly submissionStore?: SubmissionStore,
     @Optional() private readonly postgres?: PostgresPersistence,
+    @Optional() private readonly classesStore?: ClassesStore,
   ) {}
 
   async createLab(taUserId: string, input: CreateLabInput, idempotencyKey?: string): Promise<Lab> {
@@ -142,7 +145,27 @@ export class LabsService {
           : await this.authStore.activeClassesAsync(userId);
 
     const labs = await this.labsStore.getAllLabsAsync(allowedClasses, role === 'STUDENT');
-    return labs.map((lab) => (role === 'STUDENT' ? this.toStudentView(lab) : lab));
+    const classCodeCache = new Map<string, string | undefined>();
+    const resolveClassCode = async (classId: string): Promise<string | undefined> => {
+      if (!this.classesStore) {
+        return undefined;
+      }
+      if (!classCodeCache.has(classId)) {
+        const cls = await this.classesStore.getClassByIdAsync(classId);
+        classCodeCache.set(classId, cls?.code);
+      }
+      return classCodeCache.get(classId);
+    };
+
+    return Promise.all(
+      labs.map(async (lab) => {
+        const classCode = lab.classCode ?? (await resolveClassCode(lab.classId));
+        if (role === 'STUDENT') {
+          return this.toStudentView(lab, classCode);
+        }
+        return classCode ? { ...lab, classCode } : lab;
+      }),
+    );
   }
 
   async getLabForUser(
@@ -161,6 +184,12 @@ export class LabsService {
       );
     }
 
+    const classCode =
+      lab.classCode ??
+      (this.classesStore
+        ? (await this.classesStore.getClassByIdAsync(lab.classId))?.code
+        : undefined);
+
     if (role === 'TA') {
       const managedClasses = await this.authStore.taClassesAsync(userId);
       if (!managedClasses.includes(lab.classId)) {
@@ -169,7 +198,7 @@ export class LabsService {
           'You are not authorized to access labs in this class.',
         );
       }
-      return lab;
+      return classCode ? { ...lab, classCode } : lab;
     }
 
     if (role === 'STUDENT') {
@@ -180,16 +209,18 @@ export class LabsService {
           'You are not enrolled in the class owning this lab.',
         );
       }
-      return this.toStudentView(lab);
+      return this.toStudentView(lab, classCode);
     }
 
-    return lab;
+    return classCode ? { ...lab, classCode } : lab;
   }
 
-  toStudentView(lab: Lab): LabStudentView {
+  toStudentView(lab: Lab, classCode?: string): LabStudentView {
+    const resolvedClassCode = classCode ?? lab.classCode;
     return {
       id: lab.id,
       classId: lab.classId,
+      ...(resolvedClassCode ? { classCode: resolvedClassCode } : {}),
       title: lab.title,
       statement: lab.statement ?? '',
       openedAt: lab.openedAt,

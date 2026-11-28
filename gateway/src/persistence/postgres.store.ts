@@ -23,6 +23,8 @@ import {
   SubmissionTestResult,
   TaFindingReviewInput,
   TaReviewQueueEntry,
+  UserProfile,
+  UserRole,
 } from '../submissions/submissions.types';
 import { assertMigrationsApplied } from './migrations';
 import {
@@ -239,6 +241,82 @@ export class PostgresPersistence implements OnModuleInit, OnModuleDestroy {
     }
     const classIds = await this.resolveUserClasses(String(row.id), String(row.role));
     return mapUserRow(row, classIds);
+  }
+
+  /**
+   * Keyset-paginated active user directory for ADMIN staff assignment (GET /users).
+   * Strictly omits password_hash and fetches limit + 1 rows ordered by (created_at DESC, id DESC).
+   */
+  async listUsersPage(
+    role: UserRole | null,
+    cursor: KeysetCursor | null,
+    limit: number,
+  ): Promise<Array<UserProfile & { createdAt: string }>> {
+    const params: unknown[] = [];
+    const clauses: string[] = ['is_active = TRUE'];
+    if (role) {
+      params.push(role);
+      clauses.push(`role = $${params.length}`);
+    }
+    if (cursor) {
+      params.push(cursor.t, cursor.id);
+      clauses.push(`(created_at, id) < ($${params.length - 1}::timestamptz, $${params.length})`);
+    }
+    params.push(limit + 1);
+    const res = await this.requirePool().query(
+      `SELECT id, username, email, display_name, role, created_at
+       FROM users
+       WHERE ${clauses.join(' AND ')}
+       ORDER BY created_at DESC, id DESC
+       LIMIT $${params.length}`,
+      params,
+    );
+    if (res.rows.length === 0) {
+      return [];
+    }
+    const userIds = res.rows.map((r) => String(r.id));
+    const [staffRes, enrollRes] = await Promise.all([
+      this.requirePool().query<{ ta_id: string; class_id: string }>(
+        'SELECT ta_id, class_id FROM class_staff WHERE ta_id = ANY($1::text[]) ORDER BY class_id ASC',
+        [userIds],
+      ),
+      this.requirePool().query<{ student_id: string; class_id: string }>(
+        "SELECT student_id, class_id FROM class_enrollments WHERE student_id = ANY($1::text[]) AND status = 'ACTIVE' ORDER BY class_id ASC",
+        [userIds],
+      ),
+    ]);
+    const taClassesByUser = new Map<string, string[]>();
+    for (const row of staffRes.rows) {
+      const list = taClassesByUser.get(String(row.ta_id)) ?? [];
+      list.push(String(row.class_id));
+      taClassesByUser.set(String(row.ta_id), list);
+    }
+    const stuClassesByUser = new Map<string, string[]>();
+    for (const row of enrollRes.rows) {
+      const list = stuClassesByUser.get(String(row.student_id)) ?? [];
+      list.push(String(row.class_id));
+      stuClassesByUser.set(String(row.student_id), list);
+    }
+
+    return res.rows.map((row) => {
+      const uid = String(row.id);
+      const userRole = String(row.role) as UserRole;
+      const classIds =
+        userRole === 'TA'
+          ? (taClassesByUser.get(uid) ?? [])
+          : userRole === 'STUDENT'
+            ? (stuClassesByUser.get(uid) ?? [])
+            : [];
+      return {
+        id: uid,
+        username: String(row.username),
+        email: String(row.email ?? `${String(row.username)}@leetkob.edu.vn`),
+        displayName: String(row.display_name ?? row.username),
+        role: userRole,
+        classIds,
+        createdAt: toIsoString(row.created_at ?? new Date().toISOString()),
+      };
+    });
   }
 
   async taClasses(taId: string): Promise<string[]> {

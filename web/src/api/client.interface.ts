@@ -1,4 +1,4 @@
-import type { AuthSession, LoginInput, SessionUser } from '../types/auth';
+import type { AuthSession, LoginInput, SessionUser, UserRole } from '../types/auth';
 import type {
   ClassSummary,
   CreateClassInput,
@@ -12,7 +12,7 @@ import type {
   ConstraintVerdictDetail,
   LabSubmissionLookupItem,
   PublishLabResult,
-  ReviewQueueItem,
+  ReviewQueuePageResult,
   ReviewQueueQuery,
   TaReviewDecisionInput,
   TaSubmissionReviewView,
@@ -29,9 +29,10 @@ export type ApiMode = 'mock' | 'http';
 export interface LeeTkobApiClient {
   readonly mode: ApiMode;
 
-  // Auth
+  // Auth & Users
   login(input: LoginInput): Promise<AuthSession>;
   getCurrentUser(token: string): Promise<SessionUser>;
+  listUsers(token: string, role?: UserRole): Promise<SessionUser[]>;
 
   // Classes
   listClasses(token: string, cursor?: string): Promise<PaginatedResponse<ClassSummary>>;
@@ -70,7 +71,7 @@ export interface LeeTkobApiClient {
     token: string,
     labId: string,
     query: ReviewQueueQuery,
-  ): Promise<PaginatedResponse<ReviewQueueItem>>;
+  ): Promise<ReviewQueuePageResult>;
   getTaSubmissionReview(token: string, submissionId: string): Promise<TaSubmissionReviewView>;
   reviewFinding(
     token: string,

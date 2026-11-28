@@ -8,7 +8,7 @@ import { LabsService, LabStudentView } from '../labs/labs.service';
 import { LabsStore } from '../labs/labs.store';
 import { PostgresPersistence } from '../persistence/postgres.store';
 import { SubmissionStore } from '../submissions/submissions.store';
-import { Lab, UserRole } from '../submissions/submissions.types';
+import { JudgeVerdict, Lab, UserRole } from '../submissions/submissions.types';
 import { ClassesStore, ClassSummaryRecord } from './classes.store';
 
 export interface CursorPage<T> {
@@ -132,6 +132,10 @@ export class ClassesService {
       idempotencyKey && payloadHash ? { actorId, idempotencyKey, payloadHash, nowMs } : undefined,
     );
 
+    if (!this.postgres?.isEnabled()) {
+      this.authStore.assignTasToClass(created.id, created.taIds);
+    }
+
     if (idempotencyKey && payloadHash && !this.postgres?.isEnabled()) {
       this.submissionStore.saveIdempotencyRecord<ClassSummaryRecord>({
         key: idempotencyKey,
@@ -159,13 +163,20 @@ export class ClassesService {
     rawCursor?: string,
     rawLimit?: string,
   ): Promise<
-    CursorPage<(Lab | LabStudentView) & { submissionCount?: number; pendingReviewCount?: number }>
+    CursorPage<
+      (Lab | LabStudentView) & {
+        classCode?: string;
+        submissionCount?: number;
+        pendingReviewCount?: number;
+        latestStudentVerdict?: JudgeVerdict | null;
+      }
+    >
   > {
     const scope = `class-labs:${classId}`;
     const { cursor, limit } = parseKeysetPagination(rawCursor, rawLimit, scope, {
       defaultLimit: 20,
     });
-    await this.assertClassReadable(classId, userId, role);
+    const cls = await this.assertClassReadable(classId, userId, role);
 
     const rawRows = await this.labsStore.listClassLabsPageAsync(
       classId,
@@ -186,8 +197,22 @@ export class ClassesService {
         : null;
 
     if (role === 'STUDENT') {
+      const studentItems = await Promise.all(
+        pageRaw.map(async (lab) => {
+          const latest = await this.submissionStore.listSubmissionsPageAsync(
+            lab.id,
+            userId,
+            null,
+            1,
+          );
+          return {
+            ...this.labsService.toStudentView(lab, cls.code),
+            latestStudentVerdict: latest[0]?.overallVerdict ?? null,
+          };
+        }),
+      );
       return {
-        items: pageRaw.map((lab) => this.labsService.toStudentView(lab)),
+        items: studentItems,
         nextCursor,
       };
     }
@@ -205,6 +230,7 @@ export class ClassesService {
         );
         return {
           ...lab,
+          classCode: cls.code,
           submissionCount: subs.length,
           pendingReviewCount,
         };
@@ -233,7 +259,7 @@ export class ClassesService {
     classId: string,
     userId: string,
     role: UserRole,
-  ): Promise<void> {
+  ): Promise<ClassSummaryRecord> {
     const cls = await this.classesStore.getClassByIdAsync(classId);
     if (!cls) {
       throw problemException(
@@ -242,7 +268,7 @@ export class ClassesService {
       );
     }
     if (role === 'ADMIN') {
-      return;
+      return cls;
     }
     if (role === 'TA') {
       const managed = await this.authStore.taClassesAsync(userId);
@@ -252,11 +278,12 @@ export class ClassesService {
           'You are not authorized to access resources in this class.',
         );
       }
-      return;
+      return cls;
     }
     const enrolled = await this.authStore.activeClassesAsync(userId);
     if (!enrolled.includes(classId)) {
       throw problemException(HttpStatus.FORBIDDEN, 'You are not enrolled in this class.');
     }
+    return cls;
   }
 }

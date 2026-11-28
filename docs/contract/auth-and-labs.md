@@ -4,6 +4,7 @@
   - `GET /health` (`GET /v1/health`) — Service & persistence readiness probe.
   - `POST /auth/login` (`POST /v1/auth/login`) — Authenticate user by `username` or `email` and issue HS256 Bearer JWT.
   - `GET /auth/me` (`GET /v1/auth/me`) — Retrieve authenticated caller profile (`email`, `displayName`, `role`, `classIds`).
+  - `GET /users` (`GET /v1/users`) — `ADMIN`-only keyset cursor-paginated user directory (optional `?role=TA|STUDENT|ADMIN` filter for class staff assignment, `FAQ-01`).
   - `GET /classes` (`GET /v1/classes`) — Keyset cursor-paginated list of classes visible to caller role/ownership.
   - `POST /classes` (`POST /v1/classes`) — `ADMIN` creates a class and assigns TAs (`FAQ-01`), with optional DB-backed `Idempotency-Key`.
   - `GET /classes/{classId}/labs` (`GET /v1/classes/{classId}/labs`) — Keyset cursor-paginated list of labs inside a class (sanitized for students).
@@ -42,6 +43,7 @@ Except for `GET /health` and `POST /auth/login`, every endpoint requires a valid
 | `GET /health` | `200` / `503` | `200` / `503` | `200` / `503` | `200` / `503` | `200` / `503` | `200` / `503` |
 | `POST /auth/login` | `200` / `401` | `200` / `401` | `200` / `401` | `200` / `401` | `200` / `401` | `200` / `401` |
 | `GET /auth/me` | `401` | `200` | `200` | `200` | `200` | `200` |
+| `GET /users` | `401` | `403 Forbidden` | `403 Forbidden` | `403 Forbidden` | `403 Forbidden` | `200 OK` |
 | `GET /classes` | `401` | Own `ACTIVE` classes | Own `ACTIVE` classes (`[]`) | Assigned classes | Assigned classes | All classes |
 | `POST /classes` | `401` | `403 Forbidden` | `403 Forbidden` | `403 Forbidden` | `403 Forbidden` | `201 Created` |
 | `GET /classes/{classId}/labs` | `401` | `200` (sanitized) | `403 Forbidden` | `200` (full + counts) | `403 Forbidden` | `200` (full + counts) |
@@ -52,11 +54,11 @@ Except for `GET /health` and `POST /auth/login`, every endpoint requires a valid
 
 ### 1.3 Visibility & Keyset Cursor Pagination Conventions
 1. **Student Lab Redaction (`FAQ-02`, `FAQ-06`):** For `STUDENT` callers, hidden test cases (`isHidden: true`) and their inputs/expected outputs are stripped at the SQL layer (`WHERE is_hidden = FALSE`). Students always see public sample tests, every constraint with its `deduction`, runtime limits (`FAQ-05`), and `reviewNotice`.
-2. **Keyset Cursor Pagination (`GET /classes`, `GET /classes/{classId}/labs`):**
-   - Query params: `cursor` (optional opaque Base64URL string), `limit` (optional integer `1..100`, default `20`).
+2. **Keyset Cursor Pagination (`GET /users`, `GET /classes`, `GET /classes/{classId}/labs`):**
+   - Query params: `cursor` (optional opaque Base64URL string), `limit` (optional integer `1..100`, default `20` on classes/labs and `50` on users).
    - Ordering: deterministic unique keyset `(createdAt DESC, id DESC)` backed by composite indexes (`idx_classes_cursor`, `idx_labs_class_cursor`), **never `OFFSET`**.
    - Server fetches `limit + 1` rows; `nextCursor` is `null` if and only if no items remain.
-   - **Cursor Scope:** Each cursor binds its endpoint/filter scope (`classes` or `class-labs:{classId}`) and keyset tuple `(createdAt, id)`. Replaying a cursor on a different endpoint or `classId`, or passing a malformed cursor or out-of-range `limit`, returns `400 Bad Request`.
+   - **Cursor Scope:** Each cursor binds its endpoint/filter scope (`users:{role|all}`, `classes`, or `class-labs:{classId}`) and keyset tuple `(createdAt, id)`. Replaying a cursor on a different endpoint, role filter, or `classId`, or passing a malformed cursor or out-of-range `limit`, returns `400 Bad Request`.
    - **Mutations Between Pages:** Because traversal seeks strictly past `(createdAt, id)` (`WHERE (created_at, id) < ($t, $id)`), inserting newer records ahead of the cursor never shifts or duplicates previously seen items on subsequent pages; deleted rows simply do not appear.
 
 ---
@@ -70,9 +72,9 @@ Every error response returns `Content-Type: application/problem+json` with requi
 
 | Status | `type` URI | `title` | Triggering Conditions | Extensions / Headers |
 |:---:|---|---|---|---|
-| `400` | `https://leetkob.edu.vn/errors/bad-request` | `Bad Request` | Malformed JSON; invalid/out-of-scope `cursor` or `limit` outside `1..100`; invalid optional `Idempotency-Key` (non-UUID-v4); missing/invalid fields on `POST /auth/login`, `POST /classes`, `POST /labs`, or `POST /classes/{classId}/labs` (`openedAt >= deadline`, `cpuTimeLimitSec` outside `1..5`, `memoryLimitMb` outside `64..512`, empty `testCases`/`constraints`, `deduction` outside `[0, 10]`). | `errors[]` on body field validation errors |
+| `400` | `https://leetkob.edu.vn/errors/bad-request` | `Bad Request` | Malformed JSON; invalid `role` filter on `GET /users`; invalid/out-of-scope `cursor` or `limit` outside `1..100`; invalid optional `Idempotency-Key` (non-UUID-v4); missing/invalid fields on `POST /auth/login`, `POST /classes`, `POST /labs`, or `POST /classes/{classId}/labs` (`openedAt >= deadline`, `cpuTimeLimitSec` outside `1..5`, `memoryLimitMb` outside `64..512`, empty `testCases`/`constraints`, `deduction` outside `[0, 10]`). | `errors[]` on body field validation errors |
 | `401` | `https://leetkob.edu.vn/errors/unauthorized` | `Unauthorized` | Invalid `username`/`email` or `password` on `POST /auth/login`; missing, malformed, unsigned, invalid-signature, or expired Bearer JWT on protected endpoints. | — |
-| `403` | `https://leetkob.edu.vn/errors/forbidden` | `Forbidden` | Non-`ADMIN` calling `POST /classes`; non-`TA` calling `POST /labs` or `POST /classes/{classId}/labs`; cross-class TA or unenrolled student accessing a class or lab (`FAQ-01`). | — |
+| `403` | `https://leetkob.edu.vn/errors/forbidden` | `Forbidden` | Non-`ADMIN` calling `GET /users` or `POST /classes`; non-`TA` calling `POST /labs` or `POST /classes/{classId}/labs`; cross-class TA or unenrolled student accessing a class or lab (`FAQ-01`). | — |
 | `404` | `https://leetkob.edu.vn/errors/not-found` | `Not Found` | Requested `classId` (on `GET /classes/{classId}/labs`), `labId` (on `GET /labs/{labId}`), or unknown HTTP route. | — |
 | `409` | `https://leetkob.edu.vn/errors/conflict` | `Conflict` | `POST /classes` attempted with a `code` that already exists (case-insensitive, enforced atomically in DB via `LOWER(code)` unique index). | — |
 | `409` | `https://leetkob.edu.vn/errors/idempotency-conflict` | `Conflict` | Optional `Idempotency-Key` reused by the same caller within 24h with a different payload or on a different route/target class. | — |
@@ -255,6 +257,7 @@ Every error response returns `Content-Type: application/problem+json` with requi
 |---|---|---|---|
 | `id` | `string` | All roles | Opaque lab ID (`lab_*`). |
 | `classId` | `string` | All roles | Owning class ID. |
+| `classCode` | `string` | Optional (additive) | Human-readable owning class code (e.g. `CSC10002-24CLC1`). |
 | `title` | `string` | All roles | Non-empty lab title. |
 | `statement` | `string` | All roles | Markdown problem statement. |
 | `openedAt` | `string (ISO 8601)` | Optional (`string \| undefined`) | Lab opening time; strictly before `deadline` when set. |
@@ -270,6 +273,7 @@ Every error response returns `Content-Type: application/problem+json` with requi
 | `testCases` | `LabTestCase[]` | `STUDENT`: `isHidden === false` only | `{ id, ordinal?, input, expectedOutput, isHidden }`. |
 | `constraints` | `LabConstraint[]` | All roles | `{ id, code?, checkType?, text, banPatterns?, deduction (0..10) }`. |
 | `reviewNotice` | `string` | `STUDENT` only | Mandatory transparency disclosure (`FAQ-06`). |
+| `latestStudentVerdict` | `"AC" \| "WA" \| "TLE" \| "MLE" \| "RE" \| "CE" \| null` | `STUDENT` on `GET /classes/{classId}/labs` (additive) | Caller's own latest submission verdict (`null` if unsubmitted or still `QUEUED`/`JUDGING`; never leaks other students or checker data). |
 | `submissionCount` | `integer` | `TA` / `ADMIN` on `GET /classes/{classId}/labs` | Total submissions in lab (`>= 0`). |
 | `pendingReviewCount` | `integer` | `TA` / `ADMIN` on `GET /classes/{classId}/labs` | Count of `PENDING_REVIEW` queue items (`>= 0`). |
 
@@ -298,6 +302,15 @@ Every error response returns `Content-Type: application/problem+json` with requi
 ### 4.3 `GET /auth/me`
 - **Auth:** Any authenticated user (`STUDENT`, `TA`, `ADMIN`).
 - **Response (`200 OK`):** `UserProfile` (Section 3.2).
+
+### 4.3b `GET /users`
+- **Auth:** Strictly `ADMIN` (`TA`/`STUDENT` → `403 Forbidden`, unauthenticated → `401 Unauthorized`).
+- **Query Params:**
+  - `role` (optional): `"STUDENT" | "TA" | "ADMIN"`. Any other non-empty value returns `400 Bad Request`.
+  - `cursor` (optional): opaque Base64URL keyset cursor bound to scope `users:{role || 'all'}`.
+  - `limit` (optional): integer `1..100` (default `50`).
+- **Ordering:** `createdAt DESC, id DESC`.
+- **Response (`200 OK`):** `{ "items": UserProfile[], "nextCursor": "<opaque>" | null }`. Strictly omits `passwordHash` and inactive users (`is_active = FALSE`).
 
 ### 4.4 `GET /classes`
 - **Auth:** Any authenticated user (`ADMIN` sees all; `TA` sees assigned `class_staff`; `STUDENT` sees `ACTIVE` `class_enrollments`).

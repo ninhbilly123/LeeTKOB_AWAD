@@ -1,3 +1,4 @@
+import type { PaginatedResponse } from './problem-details';
 import type { JudgeVerdict, StudentTestVerdict, SubmissionPipelineStatus } from './submission';
 
 export type ConstraintCheckVerdict = 'pass' | 'violation' | 'unsure';
@@ -115,6 +116,13 @@ export interface ReviewQueueItem {
   pendingReviewCount?: number;
   maxTimeMs: number | null;
   maxMemoryKb: number | null;
+}
+
+export interface ReviewQueuePageResult extends PaginatedResponse<ReviewQueueItem> {
+  labTitle?: string;
+  isPublished?: boolean;
+  publishedAt?: string | null;
+  pendingReviewCount?: number;
 }
 
 /**

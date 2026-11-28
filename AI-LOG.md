@@ -680,3 +680,24 @@ Team Members:
   - Keeping Base64URL-encoded `{"offset": N}` pagination or editing existing test assertions to accommodate schema/response changes.
 - **Validation**:
   - Ran all four canonical root quality gates + Gateway e2e + all 3 TS workspace builds: `npm run lint` (PASSED), `npm run format:check` (PASSED), `npm run typecheck` (PASSED — TS + `mypy` 16 files), `npm run test` (**166/166 passed**: Gateway Jest 11 suites / 102 tests, Web Vitest 2 suites / 11 tests, Judge Jest 4 suites / 19 tests, Checker Pytest 34 tests), `npm run test:e2e --workspace=gateway` (1/1), and `npm run build` for `gateway`, `web`, and `judge` (all PASSED).
+
+
+---
+
+## 2026-11-29 — Connect Web Frontend to NestJS Gateway & Full-Stack Docker Compose (Phạm An Ninh)
+
+- **Tool**: Antigravity.
+- **Asked for**: Execute the approved Backend ↔ Frontend Integration Plan on branch `feat/connect-web-backend` (branched from `origin/main` after PR #33) to wire `web/` end-to-end with `gateway/` for both Docker Compose deployment and local Vite HTTP development, eliminate mock-only mismatches, add live TA pipeline polling, and verify over real HTTP without modifying any existing test.
+- **Kept**:
+  - Updated `docs/contract/auth-and-labs.md` first (Contract First): specified `ADMIN`-only keyset-paginated `GET /users` (`GET /v1/users`) with optional `role` filter (`400` on invalid role, `403` for non-`ADMIN`, no `passwordHash`) and additive `classCode` / `latestStudentVerdict` fields on Lab responses.
+  - Implemented `GET /users` in `gateway/src/persistence/postgres.store.ts`, `auth.store.ts`, `auth.service.ts`, `auth.controller.ts`, and `auth.module.ts`; added in-memory `AuthStore.assignTasToClass` parity in `ClassesService.createClass`; enriched lab responses with `classCode` and student `latestStudentVerdict` in `ClassesService.listClassLabs` and `LabsService`.
+  - Updated `web/src/` (`vite-env.d.ts`, `types/review.ts`, `api/client.interface.ts`, `http-client.ts`, `mock-client.ts`, `auth-context.tsx`, `LoginPage.tsx`, `AdminClassesPage.tsx`, `TaReviewQueuePage.tsx`, `StudentLabSolvePage.tsx`): added `listUsers`, `Idempotency-Key` headers on `createClass`/`createLab`, mode-scoped `sessionStorage` with startup `GET /auth/me` verification, optional `VITE_SHOW_DEMO_ACCOUNTS=true` quick-login using real backend seed credentials, dynamic TA `<select>` loading real DB TA IDs (`usr_ta_01`/`usr_ta_02`), preserved review-queue metadata (`labTitle`, `publishedAt`, `pendingReviewCount`, `nextCursor`), and bounded live polling on `TaReviewQueuePage` while Judge/Checker jobs are pending.
+  - Added non-root multi-stage `web/Dockerfile` (`node:22.14-alpine` → `nginxinc/nginx-unprivileged:1.27-alpine` on `:8080`), `web/nginx.conf` (`/healthz`, same-origin `/api/*` → `http://gateway:3000/`, SPA fallback), `web/.dockerignore`, `web` + conditional one-shot `gateway-seed` (`ALLOW_DEMO_SEED=true`) services in `docker-compose.yml`, value-free `WEB_PORT=`/`VITE_SHOW_DEMO_ACCOUNTS=` in `.env.example`, cross-platform root scripts (`dev:gateway`, `dev:web`, `dev:web:http`) in `package.json`, and full-stack setup instructions in `README.md`.
+  - Added 8 new integration tests (`gateway/test/web-backend-integration.contract.spec.ts` including real `fetch()` over an ephemeral `127.0.0.1:0` NestJS HTTP server, and `web/src/api/backend-wiring.spec.tsx`) without altering any existing test.
+- **Changed**:
+  - Updated `TaReviewQueuePage` `onRetry` callback to `() => void loadQueue()` so clicking retry does not pass the click `MouseEvent` as the `silent` boolean parameter.
+  - Aligned `BACKEND_DEMO_ACCOUNTS` summary text on `LoginPage.tsx` with `DEMO_ENROLLMENTS` in `gateway/src/auth/password.util.ts` (`student2` enrolled in `CSC10002-24CLC1`).
+- **Rejected**:
+  - Keeping hardcoded mock TA IDs (`usr_ta_1`/`usr_ta_2`) in `AdminClassesPage`, exposing secrets in `VITE_*` build args, or modifying/weakening any existing unit/contract test.
+- **Validation**:
+  - Ran all four canonical root quality gates + Gateway e2e + 3 workspace builds + Docker Compose validation: `npm run lint` (PASSED), `npm run format:check` (PASSED), `npm run typecheck` (PASSED — TS + `mypy` 16 files), `npm run test` (**174/174 passed**: Gateway Jest 12 suites / 106 tests, Web Vitest 3 suites / 15 tests, Judge Jest 4 suites / 19 tests, Checker Pytest 34 tests), `npm run test:e2e --workspace=gateway` (1/1 passed), `npm run build` for `gateway`, `web`, and `judge` (all PASSED), and `docker compose config --quiet` (OK).
