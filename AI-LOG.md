@@ -471,3 +471,11 @@ Team Members:
   - Adding an external message broker container (RabbitMQ) or new npm/Python packages when PostgreSQL 16 `FOR UPDATE SKIP LOCKED` + `LISTEN/NOTIFY` provides transactional outbox durability with zero dual-write risk and zero extra RAM.
 - **Validation**:
   - Ran all four canonical root commands plus builds and e2e offline: `npm run lint` (Gateway, Web, Judge ESLint + Checker Ruff — 0 errors/warnings), `npm run format:check` (Gateway, Web, Judge Prettier + Checker Ruff Format 15 files clean), `npm run typecheck` (`tsc --noEmit` on Gateway/Web/Judge + `mypy --strict` on 15 Checker files clean), `npm run test` (Gateway Jest 7 suites / 82 tests, Web Vitest 2 suites / 8 tests, Judge Jest 3 suites / 14 tests, Checker Pytest 30 tests = **134 passed**), `npm run build --workspace=judge`, `npm run build --workspace=gateway`, and `npm run test:e2e --workspace=gateway` (1/1 passed). Live Docker Compose verification (`node scripts/verify-n1-worker.mjs`) is ready to run whenever Docker Desktop is started.
+## 2026-11-28 — Add a skill for writing API contracts and contract tests
+
+- **Tool**: Codex.
+- **Asked for**: Combine the IA#3 CONTRACT.md, the applicable rubric, and LeeTKOB engineering rules into a reusable skill and require it in AGENTS.md.
+- **Kept**: The LeeTKOB submission contract's own authorization and replay behavior.
+- **Changed**: Added the five-section HTTP outline, a separate path for internal payloads, and a test workflow that checks both responses and persisted outcomes. Registered the skill in the repo catalog and AGENTS.md.
+- **Rejected**: Copying the IA#3 menu service's status codes and replay headers into LeeTKOB. These details belong to each endpoint's approved contract.
+- **Validation**: The skill-creator validator passed. Verified the five IA#3 sections, ten links, and the submission examples against the existing contract and test sources. Application tests were skipped for this documentation-only change.
