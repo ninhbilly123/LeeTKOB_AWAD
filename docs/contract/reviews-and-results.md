@@ -1,104 +1,109 @@
 # API Contract: Student Results, TA Review Queue & Grade Publishing (Task D2)
 
 - **Endpoints:**
-  - `GET /labs/{labId}/submissions` (List submissions in a lab — scoped by caller role)
-  - `GET /labs/{labId}/submissions/{submissionId}` (Retrieve submission result — Syllabus Rule sanitized for students)
-  - `GET /labs/{labId}/review-queue` (TA review queue for counted `AC` submissions)
-  - `GET /labs/{labId}/submissions/{submissionId}/review` (TA full inspection of any submission in the lab)
-  - `PATCH /labs/{labId}/submissions/{submissionId}/findings/{findingId}` (TA reviews/decides a constraint finding)
-  - `POST /labs/{labId}/publish` (TA publishes lab grades after deadline and full review)
-- **Standard Error Format:** [RFC 9457 Problem Details for HTTP APIs](https://datatracker.ietf.org/doc/html/rfc9457)
-- **Request Content-Type:** `application/json` (for `PATCH` and `POST` writes)
-- **Success Content-Type:** `application/json`
-- **Error Content-Type:** `application/problem+json`
-- **Referenced FAQs & Rules:** [FAQ-02](../proposal/FAQ.md#faq-02), [FAQ-04](../proposal/FAQ.md#faq-04), [FAQ-08](../proposal/FAQ.md#faq-08), [FAQ-09](../proposal/FAQ.md#faq-09), [FAQ-10](../proposal/FAQ.md#faq-10), [FAQ-11](../proposal/FAQ.md#faq-11), [FAQ-12](../proposal/FAQ.md#faq-12), [checker-output.md](checker-output.md), PA#3 Syllabus Rule.
+  - `GET /labs/{labId}/submissions` — List submissions in a lab (role-scoped summary).
+  - `GET /labs/{labId}/submissions/{submissionId}` — Student-safe submission result (Syllabus Rule sanitized).
+  - `GET /submissions/{submissionId}` — Direct role-dispatched submission lookup (`STUDENT` → sanitized result; `TA`/`ADMIN` → full review view).
+  - `GET /labs/{labId}/review-queue` — TA constraint review queue (`scope=counted` default | `scope=all`).
+  - `GET /labs/{labId}/submissions/{submissionId}/review` — TA single-submission inspection (full C++ source, test verdicts, all findings).
+  - `PATCH /labs/{labId}/submissions/{submissionId}/findings/{findingId}` — TA review decision (`PASS` / `VIOLATION`) with evidence and audit logging.
+  - `POST /labs/{labId}/publish` — Atomic, idempotent lab grade publishing gated by deadline, judge/checker completion, and zero pending reviews.
+- **Referenced FAQs & Contracts:** [FAQ-01](../proposal/FAQ.md#faq-01), [FAQ-02](../proposal/FAQ.md#faq-02), [FAQ-03](../proposal/FAQ.md#faq-03), [FAQ-04](../proposal/FAQ.md#faq-04), [FAQ-08](../proposal/FAQ.md#faq-08), [FAQ-09](../proposal/FAQ.md#faq-09), [FAQ-10](../proposal/FAQ.md#faq-10), [FAQ-11](../proposal/FAQ.md#faq-11), [FAQ-12](../proposal/FAQ.md#faq-12), [checker-output.md](checker-output.md), [post-submissions.md](post-submissions.md), PA#3 Syllabus Rule.
 
 ---
 
-## 1. Description & Syllabus Rule Invariants
+## 1. Conventions
 
-This contract defines the student result viewing, TA constraint review queue, and grade publishing endpoints for LeeTKOB (PA#3 Task D2).
+### 1.1 Media Types, Identifiers, Time & Units
+- **Request `Content-Type`:** `application/json` is mandatory on `PATCH` writes (returns `415 Unsupported Media Type` otherwise). `POST /labs/{labId}/publish` accepts an empty body or `application/json`.
+- **Success `Content-Type`:** `application/json`.
+- **Error `Content-Type`:** `application/problem+json` ([RFC 9457](https://datatracker.ietf.org/doc/html/rfc9457)).
+- **Timestamps:** ISO 8601 UTC strings (e.g. `2026-11-25T10:00:00.000Z`).
+- **Scores & Deductions:** Decimal points in `[0, 10]` at HTTP edges; stored internally in PostgreSQL as integer centipoints `[0, 1000]` to prevent floating-point drift.
+- **Execution Metrics:** `timeMs` in milliseconds (`>= 0`), `memoryKb` in kilobytes (`>= 0`).
+- **Unknown Fields:** Extra unrecognized JSON properties in request bodies are ignored unless a field-level validation rule explicitly rejects them.
 
-### Non-Negotiable Privacy & Grading Invariants
-1. **Student Visibility Before Publish (`FAQ-02`, `FAQ-08`):**
-   - While `lab.isPublished === false`, student-facing APIs MUST return **only** pipeline status, `overallVerdict` (`AC`, `WA`, `TLE`, `MLE`, `RE`, `CE`), `isCounting`, and per-test verdicts (`testVerdicts[]` with `ordinal`, `verdict`, `timeMs`, `memoryKb`).
-   - Student responses MUST **hide** all test inputs, expected outputs, actual outputs, compiler/runtime internals, and **all** constraint checker data (`findings`, `verdict`, `source`, `evidence`, `unsureReason`, `reason`, proposed `deduction`, and `finalScore`).
-2. **Student Visibility After Publish (`FAQ-04`, `FAQ-08`, `FAQ-11`):**
-   - Once `lab.isPublished === true`, student-facing APIs return `finalScore` and `deductions[]`.
-   - `finalScore` formula:
-     - If `overallVerdict === 'AC'`: $\max(0, 10 - \sum \text{taDeduction})$ across distinct constraints with `reviewStatus === 'APPROVED_VIOLATION'` (each constraint deducted at most once).
-     - If `overallVerdict !== 'AC'`: `0` (`FAQ-04`).
-   - `deductions[]` contains **only** constraints approved by a TA as `APPROVED_VIOLATION` (`taDecision === 'VIOLATION'`).
-   - Students **NEVER** see `unsure` verdicts, dismissed proposals (`DISMISSED_PASS`), raw checker `source`, `unsureReason`, or whether a `pass` finding was sampled in the 10% TA audit (`isSampledPass`).
+### 1.2 Authentication, Roles & Ownership
+All endpoints in this contract require a signed `HS256` Bearer JWT (`Authorization: Bearer <token>`). Missing, malformed, invalid-signature, or expired tokens return `401 Unauthorized`.
+
+| Endpoint | `STUDENT` (Enrolled) | `STUDENT` (Not Enrolled) | `TA` (Owning Class) | `TA` (Other Class) | `ADMIN` |
+|---|:---:|:---:|:---:|:---:|:---:|
+| `GET /labs/{labId}/submissions` | Own submissions only (`200`) | `403 Forbidden` | All lab submissions (`200`) | `403 Forbidden` | All (`200`) |
+| `GET /labs/{labId}/submissions/{submissionId}` | Own submission (`200`); other student's → `403` | `403 Forbidden` | `200` (sanitized view) | `403 Forbidden` | `200` |
+| `GET /submissions/{submissionId}` | Own submission sanitized (`200`); other → `403` | `403 Forbidden` | Full TA review (`200`) | `403 Forbidden` | Full TA review (`200`) |
+| `GET /labs/{labId}/review-queue` | `403 Forbidden` | `403 Forbidden` | `200 OK` | `403 Forbidden` | `200 OK` |
+| `GET /labs/{labId}/submissions/{submissionId}/review` | `403 Forbidden` | `403 Forbidden` | `200 OK` | `403 Forbidden` | `200 OK` |
+| `PATCH /labs/{labId}/submissions/{submissionId}/findings/{findingId}` | `403 Forbidden` | `403 Forbidden` | `200 OK` | `403 Forbidden` | `200 OK` |
+| `POST /labs/{labId}/publish` | `403 Forbidden` | `403 Forbidden` | `200 OK` | `403 Forbidden` | `200 OK` |
+
+### 1.3 Privacy & Grading Visibility Matrix (Syllabus Rule)
+1. **Student Before Publish (`isPublished === false`, `FAQ-02`, `FAQ-08`):**
+   - Student responses return **only** pipeline status, `overallVerdict`, `passedTests`, `totalTests`, `maxTimeMs`, `maxMemoryKb`, `isCounting`, `submittedAt`, and `testVerdicts[]` (`ordinal`, `verdict`, `timeMs`, `memoryKb`).
+   - Student responses **strictly omit** `code`, test `input`, `expectedOutput`, `actualOutput`, compiler/runtime internals, and **all** checker/review fields (`findings`, `verdict`, `source`, `evidence`, `unsureReason`, `reason`, `proposedDeduction`, `deductions`, `finalScore`, `isSampledPass`).
+2. **Student After Publish (`isPublished === true`, `FAQ-04`, `FAQ-08`, `FAQ-11`):**
+   - Adds `publishedAt`, `finalScore`, and `deductions[]`.
+   - `finalScore`: if `manualScore` was explicitly set by a TA (`FAQ-04`), returns `manualScore`; otherwise for `overallVerdict === 'AC'`, $\max(0, 10 - \sum \text{taDeduction})$ across distinct `constraintCode` entries with `reviewStatus === 'APPROVED_VIOLATION' && taDecision === 'VIOLATION'` (each constraint deducted at most once); for non-`AC`, `0`.
+   - `deductions[]` includes **only** TA-approved violations (`APPROVED_VIOLATION`). Students **never** see `unsure` verdicts, `DISMISSED_PASS` proposals, checker `source`, `unsureReason`, or `isSampledPass`.
 3. **TA Review Queue Sampling (`FAQ-02`, `FAQ-10`):**
-   - The default queue (`scope=counted`) evaluates only each student's **counted** (`isCounting === true`) `AC` submission.
-   - Included findings: **100%** of `violation`, **100%** of `unsure`, and **10% rounded up** (`Math.ceil(0.10 * totalPassFindings)`) of `pass` findings across counted `AC` submissions in the lab.
-   - TAs can inspect **any** submission in their lab (including non-sampled `pass` findings or superseded submissions) via `GET /labs/{labId}/review-queue?scope=all` or `GET /labs/{labId}/submissions/{submissionId}/review`.
-4. **TA Decision & Evidence Gate (`FAQ-09`, `FAQ-10`):**
-   - A TA must explicitly decide `PASS` or `VIOLATION` for every queued finding (including `unsure`).
-   - Selecting `VIOLATION` **requires** at least one `evidence` line (`{ line, text }`); otherwise `400 Bad Request`.
-   - Every review decision is recorded in `audit_logs`.
-5. **Publish Gate (`FAQ-12`):**
-   - `POST /labs/{labId}/publish` MUST fail with `409 Conflict` if:
-     - The lab deadline has not passed yet (`now < deadline`), **OR**
-     - Any counted `AC` submission still has `checkerStatus !== 'COMPLETED'`, **OR**
-     - Any finding on a counted submission still has `reviewStatus === 'PENDING_REVIEW'`.
-   - Once published, repeated `POST /labs/{labId}/publish` calls are idempotent and return `200 OK` with the original `publishedAt`.
+   - Default queue (`scope=counted`) evaluates only each student's **counted** (`isCounting === true`) `AC` submission.
+   - Included findings: **100%** of `violation`, **100%** of `unsure`, and **10% rounded up** (`Math.ceil(0.10 * totalPassFindings)`) of `pass` findings across counted `AC` submissions in the lab, selected randomly (at least 1 when `totalPassFindings >= 1`).
+   - TAs can inspect **any** submission in their lab (including non-`AC`, superseded, or non-sampled `pass` submissions) via `GET /labs/{labId}/submissions` + `GET /labs/{labId}/submissions/{submissionId}/review` (or `GET /submissions/{submissionId}`) and override any finding (`FAQ-10`).
 
 ---
 
-## 2. Authorization & Ownership Rules
+## 2. Errors
 
-All endpoints require a valid signed HS256 Bearer JWT (`Authorization: Bearer <token>`). Missing, expired, or invalid tokens return `401 Unauthorized`.
+Every error response returns `Content-Type: application/problem+json` with required members `type`, `title`, `status`, `detail`, and `instance`. Clients branch on `type`, never on `detail` text.
 
-| Endpoint | `STUDENT` | `TA` (Owning Class) | `TA` (Other Class) | `ADMIN` |
-|---|:---:|:---:|:---:|:---:|
-| `GET /labs/{labId}/submissions` | Own submissions only (`200`) | All lab submissions (`200`) | `403 Forbidden` | All (`200`) |
-| `GET /labs/{labId}/submissions/{submissionId}` | Own submission only (`200`); other student's $\rightarrow$ `403` | `200` (sanitized view) | `403 Forbidden` | `200` |
-| `GET /labs/{labId}/review-queue` | `403 Forbidden` | `200 OK` | `403 Forbidden` | `200 OK` |
-| `GET /labs/{labId}/submissions/{submissionId}/review` | `403 Forbidden` | `200 OK` | `403 Forbidden` | `200 OK` |
-| `PATCH /labs/{labId}/submissions/{submissionId}/findings/{findingId}` | `403 Forbidden` | `200 OK` | `403 Forbidden` | `200 OK` |
-| `POST /labs/{labId}/publish` | `403 Forbidden` | `200 OK` | `403 Forbidden` | `200 OK` |
+| Status | `type` URI | `title` | Triggering Conditions |
+|:---:|---|---|---|
+| `400` | `https://leetkob.edu.vn/errors/bad-request` | `Bad Request` | Invalid `scope` query param; invalid `decision` / `deduction` / `evidence` item; `decision === 'VIOLATION'` without $\ge 1$ evidence line (`FAQ-09`); modifying a finding after Publish without a non-empty `reason` (`FAQ-12`). |
+| `401` | `https://leetkob.edu.vn/errors/unauthorized` | `Unauthorized` | Missing, malformed, invalid-signature, or expired Bearer JWT. |
+| `403` | `https://leetkob.edu.vn/errors/forbidden` | `Forbidden` | Student accessing another student's submission (IDOR) or TA review/publish endpoints; TA accessing a lab outside assigned `class_staff`; unenrolled student accessing class lab. |
+| `404` | `https://leetkob.edu.vn/errors/not-found` | `Not Found` | Unknown `labId`, `submissionId` (or not belonging to `labId`), or `findingId`. |
+| `409` | `https://leetkob.edu.vn/errors/conflict` | `Conflict` | `POST /labs/{labId}/publish` refused because: (a) `now < deadline` (`FAQ-12`), (b) any counted submission is not yet `COMPLETED` (`FAQ-03`), (c) any counted `AC` submission has `checkerStatus !== 'COMPLETED'`, or (d) any counted finding still has `reviewStatus === 'PENDING_REVIEW'` (`FAQ-12`). |
+| `415` | `https://leetkob.edu.vn/errors/unsupported-media-type` | `Unsupported Media Type` | `PATCH` write missing `Content-Type: application/json`. |
+| `500` | `https://leetkob.edu.vn/errors/internal-error` | `Internal Server Error` | Unexpected server/database failure (fixed safe detail; never exposes SQL, paths, or stack traces). |
 
-- Students not actively enrolled (`ACTIVE`) in the lab's class receive `403 Forbidden`.
-- Non-existent `labId`, `submissionId`, or `findingId` returns `404 Not Found`.
-
----
-
-## 3. Endpoint Specifications
-
-### 3.1 List Submissions (`GET /labs/{labId}/submissions`)
-
-#### Success Response (`200 OK`)
-Returns submissions ordered by `submittedAt DESC`. For `STUDENT`, returns only the caller's submissions (sanitized, without `code` or checker findings). For `TA`/`ADMIN`, returns all submissions in the lab (metadata summary for lookup).
-
+### Example Problem Response (`409 Conflict`)
 ```json
 {
-  "labId": "lab_018f2d5e-7a91-7f3c-b26a-98124d63e001",
-  "isPublished": false,
-  "submissions": [
-    {
-      "id": "sub_9f8c1b82-412e-4b68-8a8b-18a7c6f0923e",
-      "labId": "lab_018f2d5e-7a91-7f3c-b26a-98124d63e001",
-      "studentId": "std_23120244",
-      "status": "COMPLETED",
-      "overallVerdict": "AC",
-      "passedTests": 2,
-      "totalTests": 2,
-      "isCounting": true,
-      "submittedAt": "2026-11-21T07:30:00.000Z"
-    }
-  ]
+  "type": "https://leetkob.edu.vn/errors/conflict",
+  "title": "Conflict",
+  "status": 409,
+  "detail": "Cannot publish grades while 2 review item(s) remain PENDING_REVIEW (FAQ-12).",
+  "instance": "/labs/lab_018f2d5e-7a91-7f3c-b26a-98124d63e001/publish"
 }
 ```
 
 ---
 
-### 3.2 Retrieve Student Submission Result (`GET /labs/{labId}/submissions/{submissionId}`)
+## 3. Resources
 
-#### Case A — Before Publish (`isPublished: false`) (`200 OK`)
-Strictly omits `testCases` I/O, `findings`, `evidence`, `unsureReason`, `deductions`, and `finalScore`:
+### 3.1 `SubmissionSummaryItem`
+Used inside `GET /labs/{labId}/submissions`:
+```json
+{
+  "id": "sub_9f8c1b82-412e-4b68-8a8b-18a7c6f0923e",
+  "labId": "lab_018f2d5e-7a91-7f3c-b26a-98124d63e001",
+  "studentId": "std_23120244",
+  "studentName": "Student One",
+  "status": "COMPLETED",
+  "overallVerdict": "AC",
+  "passedTests": 2,
+  "totalTests": 2,
+  "maxTimeMs": 15,
+  "maxMemoryKb": 3400,
+  "isCounting": true,
+  "submittedAt": "2026-11-21T07:30:00.000Z"
+}
+```
+- `status`: `"QUEUED" | "JUDGING" | "COMPLETED" | "JUDGE_ERROR"`.
+- `overallVerdict`: `"AC" | "WA" | "TLE" | "MLE" | "RE" | "CE" | null`.
+- `code` and checker findings are always omitted.
 
+### 3.2 `StudentSubmissionResultView`
+- **Before Publish (`isPublished: false`):** Strictly omits `code`, `publishedAt`, `finalScore`, `deductions`, `findings`, `evidence`, `unsureReason`, `isSampledPass`, and any test `input`/`expectedOutput`/`actualOutput`.
 ```json
 {
   "id": "sub_9f8c1b82-412e-4b68-8a8b-18a7c6f0923e",
@@ -108,6 +113,8 @@ Strictly omits `testCases` I/O, `findings`, `evidence`, `unsureReason`, `deducti
   "overallVerdict": "AC",
   "passedTests": 2,
   "totalTests": 2,
+  "maxTimeMs": 15,
+  "maxMemoryKb": 3400,
   "isCounting": true,
   "isPublished": false,
   "submittedAt": "2026-11-21T07:30:00.000Z",
@@ -117,10 +124,7 @@ Strictly omits `testCases` I/O, `findings`, `evidence`, `unsureReason`, `deducti
   ]
 }
 ```
-
-#### Case B — After Publish (`isPublished: true`) (`200 OK`)
-Includes `finalScore` and TA-approved `deductions[]` only (never exposes `unsure`, `DISMISSED_PASS`, or `isSampledPass`):
-
+- **After Publish (`isPublished: true`):** Adds `publishedAt`, `finalScore`, and TA-approved `deductions[]`:
 ```json
 {
   "id": "sub_9f8c1b82-412e-4b68-8a8b-18a7c6f0923e",
@@ -130,6 +134,8 @@ Includes `finalScore` and TA-approved `deductions[]` only (never exposes `unsure
   "overallVerdict": "AC",
   "passedTests": 2,
   "totalTests": 2,
+  "maxTimeMs": 15,
+  "maxMemoryKb": 3400,
   "isCounting": true,
   "isPublished": true,
   "publishedAt": "2026-11-25T10:00:00.000Z",
@@ -151,62 +157,85 @@ Includes `finalScore` and TA-approved `deductions[]` only (never exposes `unsure
 }
 ```
 
+### 3.3 `TaReviewFindingView`
+```json
+{
+  "findingId": "fnd_sub1_C1",
+  "submissionId": "sub_9f8c1b82-412e-4b68-8a8b-18a7c6f0923e",
+  "studentId": "std_23120244",
+  "studentName": "Student One",
+  "isCounting": true,
+  "submittedAt": "2026-11-21T07:30:00.000Z",
+  "constraintId": "con_lab1_C1",
+  "constraintCode": "C1",
+  "constraintText": "Do not call a library sort function: `std::sort`...",
+  "configuredDeduction": 3,
+  "proposedDeduction": 3,
+  "source": "HARD_RULE",
+  "verdict": "violation",
+  "unsureReason": null,
+  "evidence": [{ "line": 12, "text": "std::sort(a, a + n);" }],
+  "reason": "AST detected banned call to std::sort.",
+  "isSampledPass": false,
+  "reviewStatus": "PENDING_REVIEW",
+  "taDecision": null,
+  "taDeduction": null,
+  "taEvidence": null,
+  "taReason": null,
+  "reviewedBy": null,
+  "reviewedAt": null
+}
+```
+- `unsureReason`: one of `MODEL_UNSURE | SCHEMA_INVALID | EVIDENCE_MISMATCH | TIMEOUT | COST_CAP_EXCEEDED | MODEL_OFF | PROVIDER_ERROR | null` (`FAQ-09`, [checker-output.md](checker-output.md)). Non-null if and only if `verdict === "unsure"`.
+- `proposedDeduction`: equals `configuredDeduction` when `verdict === "violation"`, and `0` when `verdict` is `"pass"` or `"unsure"`.
+- `reviewStatus`: `"NOT_QUEUED" | "PENDING_REVIEW" | "APPROVED_VIOLATION" | "DISMISSED_PASS" | "OVERRIDDEN"`.
+
 ---
 
-### 3.3 TA Review Queue (`GET /labs/{labId}/review-queue`)
+## 4. Endpoints
 
-- **Query Parameters:**
-  - `scope`: `"counted"` (default) | `"all"`.
-    - When `scope=counted`: returns only `isCounting === true` `AC` submissions and only findings that are queued (`verdict === 'violation' || verdict === 'unsure' || isSampledPass === true || reviewStatus !== 'NOT_QUEUED'`).
-    - When `scope=all`: returns all `AC` submissions in the lab with all of their findings (including non-sampled `pass` findings).
+### 4.1 `GET /labs/{labId}/submissions`
+- **Auth:** `STUDENT` (enrolled), `TA` (owning class), `ADMIN`.
+- **Ordering:** `submittedAt DESC, id DESC`.
+- **Response (`200 OK`):** `{ "labId": "...", "isPublished": false, "submissions": SubmissionSummaryItem[] }`. For `STUDENT`, contains only caller's own submissions; for `TA`/`ADMIN`, contains all submissions in the lab (enabling live-demo lookup of any submission).
 
-#### Success Response (`200 OK`)
+### 4.2 `GET /labs/{labId}/submissions/{submissionId}`
+- **Auth:** `STUDENT` (own submission in enrolled class; other student's → `403`), `TA` (owning class), `ADMIN`.
+- **Response (`200 OK`):** `StudentSubmissionResultView` (Section 3.2).
+
+### 4.3 `GET /submissions/{submissionId}`
+- **Auth:** Any authenticated user with access to the submission's owning lab.
+- **Behavior:** Direct lookup alias used by the Web UI (`web/src/api/http-client.ts`):
+  - If caller role is `STUDENT` → delegates to `GET /labs/{labId}/submissions/{submissionId}` (`StudentSubmissionResultView`, enforcing IDOR `403` and Syllabus Rule redaction).
+  - If caller role is `TA` or `ADMIN` → delegates to `GET /labs/{labId}/submissions/{submissionId}/review` (`TaSubmissionReviewResponse`, enforcing cross-class TA `403`).
+
+### 4.4 `GET /labs/{labId}/review-queue`
+- **Auth:** `TA` (owning class) or `ADMIN` (`STUDENT` and other-class `TA` → `403`).
+- **Query Params:** `scope` = `"counted"` (default) | `"all"`. Any other value → `400 Bad Request`.
+- **Response (`200 OK`):**
 ```json
 {
   "labId": "lab_018f2d5e-7a91-7f3c-b26a-98124d63e001",
+  "labTitle": "Sorting Lab — Merge Sort",
   "scope": "counted",
   "isPublished": false,
+  "publishedAt": null,
   "pendingReviewCount": 2,
-  "items": [
-    {
-      "findingId": "fnd_sub1_C1",
-      "submissionId": "sub_9f8c1b82-412e-4b68-8a8b-18a7c6f0923e",
-      "studentId": "std_23120244",
-      "isCounting": true,
-      "submittedAt": "2026-11-21T07:30:00.000Z",
-      "constraintId": "con_lab1_C1",
-      "constraintCode": "C1",
-      "constraintText": "Do not call a library sort function: `std::sort`...",
-      "configuredDeduction": 3,
-      "proposedDeduction": 3,
-      "source": "HARD_RULE",
-      "verdict": "violation",
-      "unsureReason": null,
-      "evidence": [{ "line": 12, "text": "std::sort(a, a + n);" }],
-      "reason": "AST detected banned call to std::sort.",
-      "isSampledPass": false,
-      "reviewStatus": "PENDING_REVIEW",
-      "taDecision": null,
-      "taDeduction": null,
-      "taEvidence": null,
-      "taReason": null,
-      "reviewedBy": null,
-      "reviewedAt": null
-    }
-  ]
+  "items": []
 }
 ```
-> **Note (`FAQ-11`):** `configuredDeduction` is always the TA-configured deduction for that constraint; `proposedDeduction` is `configuredDeduction` when `verdict === 'violation'` and `0` when `verdict` is `'pass'` or `'unsure'` (never auto-proposed for `unsure`).
+- When `scope=counted`: includes only `isCounting === true` `AC` submissions and queued findings (`verdict === 'violation' || verdict === 'unsure' || isSampledPass === true || reviewStatus !== 'NOT_QUEUED'`).
+- When `scope=all`: includes all `AC` submissions in the lab and all of their findings.
 
----
-
-### 3.4 TA Single Submission Inspection (`GET /labs/{labId}/submissions/{submissionId}/review`)
-
-Allows a TA of the owning class (or Admin) to inspect **any** submission in the lab during review or live demo (`FAQ-10`), including full source code, test verdicts, and every constraint finding (even non-sampled `pass` findings).
-
-#### Success Response (`200 OK`)
+### 4.5 `GET /labs/{labId}/submissions/{submissionId}/review`
+- **Auth:** `TA` (owning class) or `ADMIN` (`STUDENT` and other-class `TA` → `403`).
+- **Response (`200 OK`):**
 ```json
 {
+  "labTitle": "Sorting Lab — Merge Sort",
+  "isPublished": false,
+  "publishedAt": null,
+  "studentName": "Student One",
   "submission": {
     "id": "sub_9f8c1b82-412e-4b68-8a8b-18a7c6f0923e",
     "labId": "lab_018f2d5e-7a91-7f3c-b26a-98124d63e001",
@@ -223,69 +252,41 @@ Allows a TA of the owning class (or Admin) to inspect **any** submission in the 
   "testVerdicts": [
     { "ordinal": 1, "verdict": "AC", "timeMs": 12, "memoryKb": 3200 }
   ],
-  "findings": [
-    {
-      "findingId": "fnd_sub1_C1",
-      "constraintCode": "C1",
-      "constraintText": "Do not call a library sort function: `std::sort`...",
-      "configuredDeduction": 3,
-      "proposedDeduction": 3,
-      "source": "HARD_RULE",
-      "verdict": "violation",
-      "unsureReason": null,
-      "evidence": [{ "line": 12, "text": "std::sort(a, a + n);" }],
-      "reason": "AST detected banned call to std::sort.",
-      "isSampledPass": false,
-      "reviewStatus": "PENDING_REVIEW",
-      "taDecision": null,
-      "taDeduction": null,
-      "taEvidence": null,
-      "taReason": null,
-      "reviewedBy": null,
-      "reviewedAt": null
-    }
-  ]
+  "findings": []
 }
 ```
 
----
-
-### 3.5 TA Review Decision (`PATCH /labs/{labId}/submissions/{submissionId}/findings/{findingId}`)
-
-#### Request Headers
-- `Content-Type: application/json` (mandatory; otherwise `415 Unsupported Media Type`)
-- `Authorization: Bearer <ta_jwt>`
-
-#### Request Body
+### 4.6 `PATCH /labs/{labId}/submissions/{submissionId}/findings/{findingId}`
+- **Auth:** `TA` (owning class) or `ADMIN` (`STUDENT` and other-class `TA` → `403`).
+- **Headers:** `Content-Type: application/json` (required, else `415`), `Authorization: Bearer <jwt>`.
+- **Request Body:**
 ```json
 {
   "decision": "VIOLATION",
   "deduction": 3,
-  "evidence": [
-    { "line": 12, "text": "std::sort(a, a + n);" }
-  ],
+  "evidence": [{ "line": 12, "text": "std::sort(a, a + n);" }],
   "reason": "Confirmed direct call to std::sort."
 }
 ```
+- **Validation Order & Rules:**
+  1. `Content-Type` must be `application/json` (`415`).
+  2. `decision` must be `"PASS"` or `"VIOLATION"` (`400`).
+  3. `deduction` (optional): finite number in `[0, 10]` (`400`). Defaults to the lab constraint's `configuredDeduction` when `decision === "VIOLATION"`, forced to `0` when `decision === "PASS"`.
+  4. `evidence`: required array (`length >= 1`, each `{ line: int >= 1, text: non-empty string }`) when `decision === "VIOLATION"` (`400`, `FAQ-09`).
+  5. `reason`: optional string or `null` before Publish; **required non-empty string after Publish** (`lab.isPublished === true`, else `400`, `FAQ-12`).
+- **Persistence & Audit:** Atomically updates `constraint_findings` (`reviewStatus` → `"APPROVED_VIOLATION"` or `"DISMISSED_PASS"`) and inserts a `TA_REVIEW_FINDING` row into `audit_logs` capturing both `before_state` (previous `reviewStatus`, `taDecision`, `taDeduction`) and `after_state` (`FAQ-10`, `FAQ-12`). On any `4xx` refusal, zero rows change.
+- **Response (`200 OK`):** Updated `ConstraintFindingRecord`.
 
-| Field | Type | Required | Validation Rules |
-|---|---|:---:|---|
-| `decision` | `"PASS" \| "VIOLATION"` | **Yes** | Strictly `"PASS"` or `"VIOLATION"`. |
-| `deduction` | `number` | No | Finite number in `[0, 10]`. Defaults to the lab constraint's configured `deduction` when `decision === "VIOLATION"`; forced to `0` when `decision === "PASS"`. |
-| `evidence` | `EvidenceLine[]` | Conditional | **Required (`length >= 1`)** when `decision === "VIOLATION"` (`FAQ-09`). Each item must have integer `line >= 1` and non-empty `text`. |
-| `reason` | `string \| null` | No | Optional TA explanation stored in finding and `audit_logs`. |
-
-#### Success Response (`200 OK`)
-Returns the updated `ConstraintFindingRecord` with `reviewStatus` set to `"APPROVED_VIOLATION"` (if `VIOLATION`) or `"DISMISSED_PASS"` (if `PASS`), `reviewedBy`, and `reviewedAt`.
-
----
-
-### 3.6 Publish Lab Grades (`POST /labs/{labId}/publish`)
-
-#### Request Headers
-- `Authorization: Bearer <ta_jwt>`
-
-#### Success Response (`200 OK`)
+### 4.7 `POST /labs/{labId}/publish`
+- **Auth:** `TA` (owning class) or `ADMIN` (`STUDENT` and other-class `TA` → `403`).
+- **Transactional Gate & Idempotency (`FAQ-03`, `FAQ-10`, `FAQ-12`):**
+  1. Lock the lab row (`SELECT ... FOR UPDATE`). If already published (`publishedAt !== null`), commit and return `200 OK` with the original `publishedAt` (safe idempotent retry).
+  2. If `now < deadline` → `409 Conflict` (`ROLLBACK`, no mutation).
+  3. If any counted submission (`isCounting === true`) has `status !== 'COMPLETED'` (still `QUEUED`, `JUDGING`, or `JUDGE_ERROR`) → `409 Conflict` (`ROLLBACK`, no mutation).
+  4. If any counted `AC` submission has `checkerStatus !== 'COMPLETED'` → `409 Conflict` (`ROLLBACK`, no mutation).
+  5. Rebalance the `FAQ-10` 10% `pass` sample across counted `AC` submissions.
+  6. If any finding on a counted submission has `reviewStatus === 'PENDING_REVIEW'` → `409 Conflict` (`ROLLBACK`, no mutation).
+  7. Set `labs.published_at = NOW()`, insert `PUBLISH_LAB_GRADES` into `audit_logs`, commit, and return `200 OK`:
 ```json
 {
   "labId": "lab_018f2d5e-7a91-7f3c-b26a-98124d63e001",
@@ -294,34 +295,10 @@ Returns the updated `ConstraintFindingRecord` with `reviewStatus` set to `"APPRO
 }
 ```
 
-#### Error Responses (`409 Conflict` — `application/problem+json`)
-- **Before deadline (`FAQ-12`):**
-```json
-{
-  "type": "https://leetkob.edu.vn/errors/conflict",
-  "title": "Conflict",
-  "status": 409,
-  "detail": "Cannot publish grades before the lab deadline has passed (FAQ-12).",
-  "instance": "/labs/lab_018f2d5e-7a91-7f3c-b26a-98124d63e001/publish"
-}
-```
-- **Unreviewed items remaining (`FAQ-12`):**
-```json
-{
-  "type": "https://leetkob.edu.vn/errors/conflict",
-  "title": "Conflict",
-  "status": 409,
-  "detail": "Cannot publish grades while 2 review item(s) remain PENDING_REVIEW (FAQ-12).",
-  "instance": "/labs/lab_018f2d5e-7a91-7f3c-b26a-98124d63e001/publish"
-}
-```
-- **Checker still pending on counted `AC` submissions:**
-```json
-{
-  "type": "https://leetkob.edu.vn/errors/conflict",
-  "title": "Conflict",
-  "status": 409,
-  "detail": "Cannot publish grades while 1 counted AC submission(s) have not finished constraint checking.",
-  "instance": "/labs/lab_018f2d5e-7a91-7f3c-b26a-98124d63e001/publish"
-}
-```
+---
+
+## 5. Versions and the Legacy API
+
+1. **Compatible (Non-Breaking) Additions:** Adding optional metadata fields to summary/review responses (e.g., `labTitle`, `studentName`, `maxTimeMs`, `maxMemoryKb`, `publishedAt`) or optional query filters without altering existing required keys or pre-publish student redaction invariants.
+2. **Breaking Changes:** Changing RFC 9457 error `type` URIs, weakening pre-publish student redaction, altering `decision` / `verdict` / `unsureReason` enums, or changing `POST /labs/{labId}/publish` idempotency semantics requires path versioning (`/v2/...`).
+3. **Legacy Route Compatibility:** Both `GET /labs/{labId}/submissions/{submissionId}` (PA#3 canonical) and `GET /submissions/{submissionId}` (Web UI direct alias) are supported concurrently with identical authorization and Syllabus Rule enforcement.
